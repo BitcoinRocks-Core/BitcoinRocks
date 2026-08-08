@@ -14,23 +14,24 @@
 static const struct {
     const ChainType networkId;
     const char *appName;
+    const char *iconResource;
     const int iconColorHueShift;
     const int iconColorSaturationReduction;
 } network_styles[] = {
-    {ChainType::MAIN, QAPP_APP_NAME_DEFAULT, 0, 0},
-    {ChainType::TESTNET, QAPP_APP_NAME_TESTNET, 70, 30},
-    {ChainType::TESTNET4, QAPP_APP_NAME_TESTNET4, 70, 30},
-    {ChainType::SIGNET, QAPP_APP_NAME_SIGNET, 35, 15},
-    {ChainType::REGTEST, QAPP_APP_NAME_REGTEST, 160, 30},
+    {ChainType::MAIN, QAPP_APP_NAME_DEFAULT, ":/icons/bitcoinrocks", 0, 0},
+    {ChainType::TESTNET, QAPP_APP_NAME_TESTNET, ":/icons/bitcoin_testnet", 0, 0},
+    {ChainType::TESTNET4, QAPP_APP_NAME_TESTNET4, ":/icons/bitcoin_testnet", 0, 0},
+    {ChainType::SIGNET, QAPP_APP_NAME_SIGNET, ":/icons/bitcoin_signet", 0, 0},
+    {ChainType::REGTEST, QAPP_APP_NAME_REGTEST, ":/icons/bitcoinrocks", 160, 30},
 };
 
 // titleAddText needs to be const char* for tr()
-NetworkStyle::NetworkStyle(const QString &_appName, const int iconColorHueShift, const int iconColorSaturationReduction, const char *_titleAddText):
+NetworkStyle::NetworkStyle(const QString &_appName, const char *iconResource, const int iconColorHueShift, const int iconColorSaturationReduction, const char *_titleAddText):
     appName(_appName),
     titleAddText(qApp->translate("SplashScreen", _titleAddText))
 {
     // load pixmap
-    QPixmap pixmap(":/icons/bitcoin");
+    QPixmap pixmap(iconResource);
 
     if(iconColorHueShift != 0 && iconColorSaturationReduction != 0)
     {
@@ -85,6 +86,7 @@ const NetworkStyle* NetworkStyle::instantiate(const ChainType networkId)
         if (networkId == network_style.networkId) {
             return new NetworkStyle(
                     network_style.appName,
+                    network_style.iconResource,
                     network_style.iconColorHueShift,
                     network_style.iconColorSaturationReduction,
                     titleAddText.c_str());

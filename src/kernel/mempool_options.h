@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 class ValidationSignals;
 
@@ -43,6 +44,15 @@ struct MemPoolOptions {
     /** A fee rate smaller than this is considered zero fee (for relaying, mining and transaction creation) */
     CFeeRate min_relay_feerate{DEFAULT_MIN_RELAY_TX_FEE};
     CFeeRate dust_relay_feerate{DUST_RELAY_TX_FEE};
+    /**
+     * BitcoinRocks transaction relay policy profile and its effective
+     * tapscript/logging controls.
+     */
+    std::string policy_profile{"core"};
+    std::optional<unsigned> max_tapscript_bytes{};
+    bool policy_log{false};
+    bool policy_log_details{false};
+
     /**
      * A data carrying output is an unspendable output containing data. The script
      * type is designated as TxoutType::NULL_DATA.

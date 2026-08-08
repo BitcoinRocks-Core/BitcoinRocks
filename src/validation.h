@@ -89,6 +89,9 @@ static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
 /** Maximum number of dedicated script-checking threads allowed */
 static constexpr int MAX_SCRIPTCHECK_THREADS{15};
 
+/** Maximum number of dedicated threads allowed for prefetching block input prevouts */
+static constexpr int32_t MAX_PREVOUTFETCH_THREADS{16};
+
 /** Current sync state passed to tip changed callbacks. */
 enum class SynchronizationState {
     INIT_REINDEX,
@@ -479,11 +482,11 @@ enum class FlushStateMode: uint8_t {
 class CoinsViews {
 
 public:
-    //! The lowest level of the CoinsViews cache hierarchy sits in a leveldb database on disk.
+    //! The lowest level of the CoinsViews cache hierarchy sits in a database on disk.
     //! All unspent coins reside in this store.
     CCoinsViewDB m_dbview GUARDED_BY(cs_main);
 
-    //! This view wraps access to the leveldb instance and handles read errors gracefully.
+    //! This view wraps access to the database instance and handles read errors gracefully.
     CCoinsViewErrorCatcher m_catcherview GUARDED_BY(cs_main);
 
     //! This is the top layer of the cache hierarchy - it keeps as many coins in memory as
@@ -503,7 +506,7 @@ public:
     CoinsViews(DBParams db_params, CoinsViewOptions options);
 
     //! Initialize the CCoinsViewCache member.
-    void InitCache() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void InitCache(int32_t prevoutfetch_threads) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 };
 
 enum class CoinsCacheSizeState
@@ -588,7 +591,7 @@ public:
         ChainstateManager& chainman,
         std::optional<uint256> from_snapshot_blockhash = std::nullopt);
 
-    //! Return path to chainstate leveldb directory.
+    //! Return path to the chainstate database directory.
     fs::path StoragePath() const;
 
     //! Return the current role of the chainstate. See `ChainstateManager`
@@ -891,7 +894,7 @@ protected:
     NodeClock::time_point m_next_write{NodeClock::time_point::max()};
 
     /**
-     * In case of an invalid snapshot, rename the coins leveldb directory so
+     * In case of an invalid snapshot, rename the coins database directory so
      * that it can be examined for issue diagnosis.
      */
     [[nodiscard]] util::Result<void> InvalidateCoinsDBOnDisk() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
@@ -950,8 +953,7 @@ private:
     //! De-serialization of a snapshot that is created with
     //! the dumptxoutset RPC.
     //! To reduce space the serialization format of the snapshot avoids
-    //! duplication of tx hashes. The code takes advantage of the guarantee by
-    //! leveldb that keys are lexicographically sorted.
+    //! duplication of tx hashes. The code takes advantage of the guarantee that database keys are lexicographically sorted.
     [[nodiscard]] util::Result<void> PopulateAndValidateSnapshot(
         Chainstate& snapshot_chainstate,
         AutoFile& coins_file,
@@ -1081,7 +1083,7 @@ public:
     //! coins caches. This will be split somehow across chainstates.
     size_t m_total_coinstip_cache{0};
     //
-    //! The total number of bytes available for us to use across all leveldb
+    //! The total number of bytes available for us to use across all
     //! coins databases. This will be split somehow across chainstates.
     size_t m_total_coinsdb_cache{0};
 
@@ -1342,7 +1344,7 @@ public:
     //! validation of the snapshot.
     //!
     //! If the cleanup succeeds, the caller will need to ensure chainstates are
-    //! reinitialized, since ResetChainstates() will be called before leveldb
+    //! reinitialized, since ResetChainstates() will be called before database
     //! directories are moved or deleted.
     //!
     //! @sa node/chainstate:LoadChainstate()

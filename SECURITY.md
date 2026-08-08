@@ -1,8 +1,20 @@
 # Security Policy
 
+Security vulnerabilities discovered in Bitcoin Core-derived code that are not
+specific to BitcoinRocks should be reported directly to the upstream Bitcoin
+Core project.
+
+Security vulnerabilities introduced by BitcoinRocks-specific changes,
+including the RocksDB integration and storage implementation, should be
+reported to the BitcoinRocks developers.
+
+Vulnerabilities confirmed to originate within RocksDB itself should also be
+reported to the upstream RocksDB project.
+
+
 ## Supported Versions
 
-See our website for versions of Bitcoin Core that are currently supported with
+See the Bitcoin website for versions of Bitcoin Core that are currently supported with
 security updates: https://bitcoincore.org/en/lifecycle/#schedule
 
 ## Reporting a Vulnerability

@@ -30,7 +30,7 @@ struct TxoSpender {
 
 /**
  * TxoSpenderIndex is used to look up which transaction spent a given output.
- * The index is written to a LevelDB database and, for each input of each transaction in a block,
+ * The index is written to a database and, for each input of each transaction in a block,
  * records the outpoint that is spent and the hash of the spending transaction.
  */
 class TxoSpenderIndex final : public BaseIndex

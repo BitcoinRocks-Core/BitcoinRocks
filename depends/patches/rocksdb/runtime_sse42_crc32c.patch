@@ -1,0 +1,81 @@
+--- a/util/crc32c.cc
++++ b/util/crc32c.cc
+@@ -47,8 +47,22 @@
+
+ ASSERT_FEATURE_COMPAT_HEADER();
+
+-#ifdef __SSE4_2__
++// BitcoinRocks: retain RocksDB's portable x86-64 baseline while compiling
++// the optimized SSE4.2/PCLMUL CRC32C implementation as a runtime-selected
++// target on GCC and Clang.
++#if defined(__x86_64__) && \
++    (defined(__GNUC__) || defined(__clang__)) && \
++    !defined(NO_PCLMUL) && \
++    !(defined(__SSE4_2__) && defined(__PCLMUL__))
++#define ROCKSDB_RUNTIME_X86_CRC32C 1
++#endif
++
++#if defined(__SSE4_2__) || defined(ROCKSDB_RUNTIME_X86_CRC32C)
+ #include <nmmintrin.h>
++#endif
++
++#if (defined(__SSE4_2__) && defined(__PCLMUL__)) || \
++    defined(ROCKSDB_RUNTIME_X86_CRC32C)
+ #include <wmmintrin.h>
+ #endif
+
+@@ -426,7 +440,17 @@
+  * <davejwatson@fb.com>
+  *
+  */
+-#if defined(__SSE4_2__) && defined(__PCLMUL__)
++#if (defined(__SSE4_2__) && defined(__PCLMUL__)) || \
++    defined(ROCKSDB_RUNTIME_X86_CRC32C)
++
++#if defined(ROCKSDB_RUNTIME_X86_CRC32C)
++#if defined(__clang__)
++#pragma clang attribute push(__attribute__((target("sse4.2,pclmul"))), apply_to = function)
++#elif defined(__GNUC__)
++#pragma GCC push_options
++#pragma GCC target("sse4.2,pclmul")
++#endif
++#endif
+
+ #define CRCtriplet(crc, buf, offset)                  \
+   crc##0 = _mm_crc32_u64(crc##0, *(buf##0 + offset)); \
+@@ -1101,7 +1125,15 @@
+   }
+ }
+
+-#endif //__SSE4_2__ && __PCLMUL__
++#if defined(ROCKSDB_RUNTIME_X86_CRC32C)
++#if defined(__clang__)
++#pragma clang attribute pop
++#elif defined(__GNUC__)
++#pragma GCC pop_options
++#endif
++#endif
++
++#endif  // (__SSE4_2__ && __PCLMUL__) || ROCKSDB_RUNTIME_X86_CRC32C
+
+ static inline Function Choose_Extend() {
+ #ifdef HAVE_POWER8
+@@ -1113,6 +1145,18 @@
+   } else {
+     return ExtendImpl<DefaultCRC32>;
+   }
++#elif defined(ROCKSDB_RUNTIME_X86_CRC32C) && \
++    !defined NO_THREEWAY_CRC32C
++  // ChosenExtend is initialized before main(), so initialize GCC/Clang's
++  // CPU feature detector before querying it.
++  __builtin_cpu_init();
++
++  if (__builtin_cpu_supports("sse4.2") &&
++      __builtin_cpu_supports("pclmul")) {
++    return crc32c_3way;
++  }
++
++  return ExtendImpl<DefaultCRC32>;
+ #elif defined(__SSE4_2__) && defined(__PCLMUL__) && !defined NO_THREEWAY_CRC32C
+   // NOTE: runtime detection no longer supported on x86
+ #ifdef _MSC_VER

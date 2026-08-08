@@ -59,6 +59,7 @@
 #include <util/signalinterrupt.h>
 #include <util/strencodings.h>
 #include <util/string.h>
+#include <util/threadpool.h>
 #include <util/time.h>
 #include <util/trace.h>
 #include <util/translation.h>
@@ -71,8 +72,10 @@
 #include <numeric>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -88,6 +91,81 @@ using node::BlockMap;
 using node::CBlockIndexHeightOnlyComparator;
 using node::CBlockIndexWorkComparator;
 using node::SnapshotMetadata;
+
+
+namespace {
+
+bool ShouldLogPolicyRejection(
+    const Wtxid& wtxid,
+    std::string_view profile)
+{
+    static Mutex mutex;
+    static std::set<Wtxid> logged_wtxids;
+    static int64_t window_start{0};
+    static uint32_t window_count{0};
+    static uint64_t suppressed{0};
+
+    LOCK(mutex);
+
+    const int64_t now{GetTime()};
+
+    if (window_start == 0 ||
+        now - window_start >= 60) {
+        if (suppressed > 0) {
+            LogInfo(
+                "User-selected policy profile \"%s\" "
+                "suppressed %u duplicate or rate-limited "
+                "policy rejection log entries during the "
+                "previous 60 seconds",
+                std::string{profile},
+                suppressed);
+        }
+
+        window_start = now;
+        window_count = 0;
+        suppressed = 0;
+    }
+
+    if (logged_wtxids.size() >= 100'000) {
+        logged_wtxids.clear();
+    }
+
+    const bool inserted{
+        logged_wtxids.insert(wtxid).second
+    };
+
+    if (!inserted) {
+        ++suppressed;
+        return false;
+    }
+
+    if (window_count >= 100) {
+        ++suppressed;
+        return false;
+    }
+
+    ++window_count;
+    return true;
+}
+
+uint64_t GetDataCarrierBytes(
+    const CTransaction& tx)
+{
+    uint64_t total{0};
+
+    for (const CTxOut& txout : tx.vout) {
+        TxoutType type;
+
+        if (::IsStandard(txout.scriptPubKey, type) &&
+            type == TxoutType::NULL_DATA) {
+            total += txout.scriptPubKey.size();
+        }
+    }
+
+    return total;
+}
+
+} // namespace
 
 /** Time window to wait between writing blocks/block index and chainstate to disk.
  *  Randomize writing time inside the window to prevent a situation where the
@@ -802,6 +880,77 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // Alias what we need out of ws
     TxValidationState& state = ws.m_state;
 
+    auto log_policy_rejection = [&](
+        std::string_view category,
+        std::string_view rejection_reason,
+        std::optional<unsigned int> input_index =
+            std::nullopt,
+        std::optional<uint64_t> actual_size =
+            std::nullopt,
+        std::optional<uint64_t> limit =
+            std::nullopt,
+        bool inscription_like = false) {
+        const std::string rejection_reason_string{
+            rejection_reason
+        };
+
+        // PreChecks holds m_pool.cs, so recording here is synchronized
+        // with getmempoolinfo and the rest of mempool admission.
+        m_pool.RecordPolicyRejection(
+            rejection_reason_string);
+
+        if (!m_pool.m_opts.policy_log) {
+            return;
+        }
+
+        const Wtxid wtxid{tx.GetWitnessHash()};
+
+        if (!ShouldLogPolicyRejection(
+                wtxid,
+                m_pool.m_opts.policy_profile)) {
+            return;
+        }
+
+        std::string details;
+
+        if (m_pool.m_opts.policy_log_details) {
+            if (input_index) {
+                details += strprintf(
+                    " input=%u",
+                    *input_index);
+            }
+
+            if (actual_size) {
+                details += strprintf(
+                    " actual_size=%u",
+                    *actual_size);
+            }
+
+            if (limit) {
+                details += strprintf(
+                    " limit=%u",
+                    *limit);
+            }
+
+            if (inscription_like) {
+                details +=
+                    " classification="
+                    "inscription-like-ordinals-envelope";
+            }
+        }
+
+        LogInfo(
+            "User-selected policy profile \"%s\" "
+            "refused to relay transaction "
+            "txid=%s wtxid=%s category=%s reason=%s%s",
+            m_pool.m_opts.policy_profile,
+            hash.ToString(),
+            wtxid.ToString(),
+            std::string{category},
+            rejection_reason_string,
+            details);
+    };
+
     if (!CheckTransaction(tx, state)) {
         return false; // state filled in by CheckTransaction
     }
@@ -813,7 +962,34 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
     if (m_pool.m_opts.require_standard && !IsStandardTx(tx, m_pool.m_opts.max_datacarrier_bytes, m_pool.m_opts.permit_bare_multisig, m_pool.m_opts.dust_relay_feerate, reason)) {
-        return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
+        if (reason == "datacarrier" &&
+            m_pool.m_opts.max_datacarrier_bytes !=
+                std::optional<unsigned>{
+                    MAX_OP_RETURN_RELAY}) {
+            const bool datacarrier_disabled{
+                !m_pool.m_opts.max_datacarrier_bytes
+            };
+
+            log_policy_rejection(
+                "OP_RETURN/data-carrier",
+                datacarrier_disabled
+                    ? "datacarrier-disabled"
+                    : "datacarrier-size",
+                std::nullopt,
+                GetDataCarrierBytes(tx),
+                m_pool.m_opts.max_datacarrier_bytes
+                    .value_or(0));
+        } else if (
+            reason == "bare-multisig" &&
+            !m_pool.m_opts.permit_bare_multisig) {
+            log_policy_rejection(
+                "bare-multisig",
+                "bare-multisig-disabled");
+        }
+
+        return state.Invalid(
+            TxValidationResult::TX_NOT_STANDARD,
+            reason);
     }
 
     // Transactions smaller than 65 non-witness bytes are not relayed to mitigate CVE-2017-12842.
@@ -905,8 +1081,33 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     }
 
     // Check for non-standard witnesses.
-    if (tx.HasWitness() && m_pool.m_opts.require_standard && !IsWitnessStandard(tx, m_view)) {
-        return state.Invalid(TxValidationResult::TX_WITNESS_MUTATED, "bad-witness-nonstandard");
+    WitnessStandardnessResult witness_result;
+
+    if (tx.HasWitness() &&
+        m_pool.m_opts.require_standard &&
+        !IsWitnessStandard(
+            tx,
+            m_view,
+            m_pool.m_opts.max_tapscript_bytes,
+            witness_result)) {
+        if (witness_result.reason ==
+                "tapscript-disabled" ||
+            witness_result.reason ==
+                "tapscript-size") {
+            log_policy_rejection(
+                witness_result.inscription_like
+                    ? "Ordinals/inscriptions"
+                    : "Taproot-script-path",
+                witness_result.reason,
+                witness_result.input_index,
+                witness_result.actual_size,
+                witness_result.limit,
+                witness_result.inscription_like);
+        }
+
+        return state.Invalid(
+            TxValidationResult::TX_WITNESS_MUTATED,
+            "bad-witness-nonstandard");
     }
 
     int64_t nSigOpsCost = GetTransactionSigOpCost(tx, m_view, STANDARD_SCRIPT_VERIFY_FLAGS);
@@ -1857,11 +2058,16 @@ CoinsViews::CoinsViews(DBParams db_params, CoinsViewOptions options)
     : m_dbview{std::move(db_params), std::move(options)},
       m_catcherview(&m_dbview) {}
 
-void CoinsViews::InitCache()
+void CoinsViews::InitCache(int32_t prevoutfetch_threads)
 {
     AssertLockHeld(::cs_main);
     m_cacheview = std::make_unique<CCoinsViewCache>(&m_catcherview);
-    m_connect_block_view = std::make_unique<CoinsViewOverlay>(&*m_cacheview);
+    auto thread_pool{std::make_shared<ThreadPool>("prevout")};
+    if (prevoutfetch_threads > 0) {
+        thread_pool->Start(prevoutfetch_threads);
+        LogInfo("Block input prevout fetching uses %d additional threads", prevoutfetch_threads);
+    }
+    m_connect_block_view = std::make_unique<CoinsViewOverlay>(&*m_cacheview, std::move(thread_pool));
 }
 
 Chainstate::Chainstate(
@@ -1937,7 +2143,7 @@ void Chainstate::InitCoinsCache(size_t cache_size_bytes)
     AssertLockHeld(::cs_main);
     assert(m_coins_views != nullptr);
     m_coinstip_cache_size_bytes = cache_size_bytes;
-    m_coins_views->InitCache();
+    m_coins_views->InitCache(m_chainman.m_options.prevoutfetch_threads_num);
 }
 
 // Lock-free: depends on `m_cached_is_ibd`, which is latched by `UpdateIBDStatus()`.
@@ -3079,8 +3285,8 @@ bool Chainstate::ConnectTip(
     LogDebug(BCLog::BENCH, "  - Load block from disk: %.2fms\n",
              Ticks<MillisecondsDouble>(time_2 - time_1));
     {
-        CCoinsViewCache& view{*m_coins_views->m_connect_block_view};
-        const auto reset_guard{view.CreateResetGuard()};
+        CoinsViewOverlay& view{*m_coins_views->m_connect_block_view};
+        const auto reset_guard{view.StartFetching(*block_to_connect)};
         bool rv = ConnectBlock(*block_to_connect, state, pindexNew, view);
         if (m_chainman.m_options.signals) {
             m_chainman.m_options.signals->BlockChecked(block_to_connect, state);
@@ -5006,79 +5212,122 @@ void ChainstateManager::LoadExternalBlockFile(
     FlatFilePos* dbp,
     std::multimap<uint256, FlatFilePos>* blocks_with_unknown_parent)
 {
-    // Either both should be specified (-reindex), or neither (-loadblock).
     assert(!dbp == !blocks_with_unknown_parent);
 
     const auto start{SteadyClock::now()};
     const CChainParams& params{GetParams()};
-
     int nLoaded = 0;
+
     try {
-        BufferedFile blkdat{file_in, 2 * MAX_BLOCK_SERIALIZED_SIZE, MAX_BLOCK_SERIALIZED_SIZE + 8};
-        // nRewind indicates where to resume scanning in case something goes wrong,
-        // such as a block fails to deserialize.
+        BufferedFile blkdat{
+            file_in,
+            2 * MAX_BLOCK_SERIALIZED_SIZE,
+            MAX_BLOCK_SERIALIZED_SIZE + node::STORAGE_HEADER_BYTES
+        };
+
         uint64_t nRewind = blkdat.GetPos();
+
         while (!blkdat.eof()) {
             if (m_interrupt) return;
 
             blkdat.SetPos(nRewind);
-            nRewind++; // start one byte further next time, in case of failure
-            blkdat.SetLimit(); // remove former limit
-            unsigned int nSize = 0;
+            nRewind++;
+            blkdat.SetLimit();
+
+            uint32_t size_field{0};
+            uint32_t stored_size{0};
+            bool compressed{false};
+
             try {
-                // locate a header
                 MessageStartChars buf;
                 blkdat.FindByte(std::byte(params.MessageStart()[0]));
                 nRewind = blkdat.GetPos() + 1;
                 blkdat >> buf;
+
                 if (buf != params.MessageStart()) {
                     continue;
                 }
-                // read size
-                blkdat >> nSize;
-                if (nSize < 80 || nSize > MAX_BLOCK_SERIALIZED_SIZE)
+
+                blkdat >> size_field;
+                compressed = node::IsCompressedBlockRecord(size_field);
+                stored_size = node::GetBlockRecordPayloadSize(size_field);
+
+                if (
+                    stored_size == 0 ||
+                    stored_size > MAX_BLOCK_SERIALIZED_SIZE ||
+                    (!compressed && stored_size < 80)
+                ) {
                     continue;
+                }
             } catch (const std::exception&) {
-                // no valid block header found; don't complain
-                // (this happens at the end of every blk.dat file)
                 break;
             }
-            try {
-                // read block header
-                const uint64_t nBlockPos{blkdat.GetPos()};
-                if (dbp)
-                    dbp->nPos = nBlockPos;
-                blkdat.SetLimit(nBlockPos + nSize);
-                CBlockHeader header;
-                blkdat >> header;
-                const uint256 hash{header.GetHash()};
-                // Skip the rest of this block (this may read from disk into memory); position to the marker before the
-                // next block, but it's still possible to rewind to the start of the current block (without a disk read).
-                nRewind = nBlockPos + nSize;
-                blkdat.SkipTo(nRewind);
 
-                std::shared_ptr<CBlock> pblock{}; // needs to remain available after the cs_main lock is released to avoid duplicate reads from disk
+            try {
+                const uint64_t nBlockPos{blkdat.GetPos()};
+                if (dbp) {
+                    dbp->nPos = nBlockPos;
+                }
+
+                blkdat.SetLimit(nBlockPos + stored_size);
+
+                CBlockHeader header;
+                std::shared_ptr<CBlock> decoded_compressed_block;
+
+                if (compressed) {
+                    std::vector<std::byte> stored(stored_size);
+                    blkdat.read(stored);
+                    std::vector<std::byte> raw{
+                        node::DecompressBlockPayload(stored)
+                    };
+
+                    decoded_compressed_block = std::make_shared<CBlock>();
+                    SpanReader{raw} >> TX_WITH_WITNESS(*decoded_compressed_block);
+                    header = static_cast<const CBlockHeader&>(*decoded_compressed_block);
+
+                    nRewind = nBlockPos + stored_size;
+                    blkdat.SkipTo(nRewind);
+                } else {
+                    blkdat >> header;
+                    nRewind = nBlockPos + stored_size;
+                    blkdat.SkipTo(nRewind);
+                }
+
+                const uint256 hash{header.GetHash()};
+                std::shared_ptr<CBlock> pblock{};
 
                 {
                     LOCK(cs_main);
-                    // detect out of order blocks, and store them for later
-                    if (hash != params.GetConsensus().hashGenesisBlock && !m_blockman.LookupBlockIndex(header.hashPrevBlock)) {
-                        LogDebug(BCLog::REINDEX, "%s: Out of order block %s, parent %s not known\n", __func__, hash.ToString(),
-                                 header.hashPrevBlock.ToString());
+
+                    if (
+                        hash != params.GetConsensus().hashGenesisBlock &&
+                        !m_blockman.LookupBlockIndex(header.hashPrevBlock)
+                    ) {
+                        LogDebug(
+                            BCLog::REINDEX,
+                            "%s: Out of order block %s, parent %s not known\n",
+                            __func__,
+                            hash.ToString(),
+                            header.hashPrevBlock.ToString()
+                        );
+
                         if (dbp && blocks_with_unknown_parent) {
                             blocks_with_unknown_parent->emplace(header.hashPrevBlock, *dbp);
                         }
                         continue;
                     }
 
-                    // process in case the block isn't known yet
-                    const CBlockIndex* pindex = m_blockman.LookupBlockIndex(hash);
+                    const CBlockIndex* pindex{m_blockman.LookupBlockIndex(hash)};
+
                     if (!pindex || (pindex->nStatus & BLOCK_HAVE_DATA) == 0) {
-                        // This block can be processed immediately; rewind to its start, read and deserialize it.
-                        blkdat.SetPos(nBlockPos);
-                        pblock = std::make_shared<CBlock>();
-                        blkdat >> TX_WITH_WITNESS(*pblock);
-                        nRewind = blkdat.GetPos();
+                        if (compressed) {
+                            pblock = std::move(decoded_compressed_block);
+                        } else {
+                            blkdat.SetPos(nBlockPos);
+                            pblock = std::make_shared<CBlock>();
+                            blkdat >> TX_WITH_WITNESS(*pblock);
+                            nRewind = blkdat.GetPos();
+                        }
 
                         BlockValidationState state;
                         if (AcceptBlock(pblock, state, nullptr, true, dbp, nullptr, true)) {
@@ -5087,33 +5336,34 @@ void ChainstateManager::LoadExternalBlockFile(
                         if (state.IsError()) {
                             break;
                         }
-                    } else if (hash != params.GetConsensus().hashGenesisBlock && pindex->nHeight % 1000 == 0) {
-                        LogDebug(BCLog::REINDEX, "Block Import: already had block %s at height %d\n", hash.ToString(), pindex->nHeight);
+                    } else if (
+                        hash != params.GetConsensus().hashGenesisBlock &&
+                        pindex->nHeight % 1000 == 0
+                    ) {
+                        LogDebug(
+                            BCLog::REINDEX,
+                            "Block Import: already had block %s at height %d\n",
+                            hash.ToString(),
+                            pindex->nHeight
+                        );
                     }
                 }
 
-                // Activate the genesis block so normal node progress can continue
-                // During first -reindex, this will only connect Genesis since
-                // ActivateBestChain only connects blocks which are in the block tree db,
-                // which only contains blocks whose parents are in it.
-                // But do this only if genesis isn't activated yet, to avoid connecting many blocks
-                // without assumevalid in the case of a continuation of a reindex that
-                // was interrupted by the user.
-                if (hash == params.GetConsensus().hashGenesisBlock && WITH_LOCK(::cs_main, return ActiveHeight()) == -1) {
+                if (
+                    hash == params.GetConsensus().hashGenesisBlock &&
+                    WITH_LOCK(::cs_main, return ActiveHeight()) == -1
+                ) {
                     BlockValidationState state;
                     if (!ActiveChainstate().ActivateBestChain(state, nullptr)) {
                         break;
                     }
                 }
 
-                if (m_blockman.IsPruneMode() && m_blockman.m_blockfiles_indexed && pblock) {
-                    // must update the tip for pruning to work while importing with -loadblock.
-                    // this is a tradeoff to conserve disk space at the expense of time
-                    // spent updating the tip to be able to prune.
-                    // otherwise, ActivateBestChain won't be called by the import process
-                    // until after all of the block files are loaded. ActivateBestChain can be
-                    // called by concurrent network message processing. but, that is not
-                    // reliable for the purpose of pruning while importing.
+                if (
+                    m_blockman.IsPruneMode() &&
+                    m_blockman.m_blockfiles_indexed &&
+                    pblock
+                ) {
                     if (auto result{ActivateBestChains()}; !result) {
                         LogDebug(BCLog::REINDEX, "%s\n", util::ErrorString(result).original);
                         break;
@@ -5122,52 +5372,79 @@ void ChainstateManager::LoadExternalBlockFile(
 
                 NotifyHeaderTip();
 
-                if (!blocks_with_unknown_parent) continue;
+                if (!blocks_with_unknown_parent) {
+                    continue;
+                }
 
-                // Recursively process earlier encountered successors of this block
                 std::deque<uint256> queue;
                 queue.push_back(hash);
+
                 while (!queue.empty()) {
                     uint256 head = queue.front();
                     queue.pop_front();
-                    auto range = blocks_with_unknown_parent->equal_range(head);
+                    auto range{blocks_with_unknown_parent->equal_range(head)};
+
                     while (range.first != range.second) {
-                        std::multimap<uint256, FlatFilePos>::iterator it = range.first;
-                        std::shared_ptr<CBlock> pblockrecursive = std::make_shared<CBlock>();
+                        auto it = range.first;
+                        auto pblockrecursive = std::make_shared<CBlock>();
+
                         if (m_blockman.ReadBlock(*pblockrecursive, it->second, {})) {
                             const auto& block_hash{pblockrecursive->GetHash()};
-                            LogDebug(BCLog::REINDEX, "%s: Processing out of order child %s of %s", __func__, block_hash.ToString(), head.ToString());
+                            LogDebug(
+                                BCLog::REINDEX,
+                                "%s: Processing out of order child %s of %s",
+                                __func__,
+                                block_hash.ToString(),
+                                head.ToString()
+                            );
+
                             LOCK(cs_main);
                             BlockValidationState dummy;
-                            if (AcceptBlock(pblockrecursive, dummy, nullptr, true, &it->second, nullptr, true)) {
+                            if (
+                                AcceptBlock(
+                                    pblockrecursive,
+                                    dummy,
+                                    nullptr,
+                                    true,
+                                    &it->second,
+                                    nullptr,
+                                    true
+                                )
+                            ) {
                                 nLoaded++;
                                 queue.push_back(block_hash);
                             }
                         }
+
                         range.first++;
                         blocks_with_unknown_parent->erase(it);
                         NotifyHeaderTip();
                     }
                 }
             } catch (const std::exception& e) {
-                // historical bugs added extra data to the block files that does not deserialize cleanly.
-                // commonly this data is between readable blocks, but it does not really matter. such data is not fatal to the import process.
-                // the code that reads the block files deals with invalid data by simply ignoring it.
-                // it continues to search for the next {4 byte magic message start bytes + 4 byte length + block} that does deserialize cleanly
-                // and passes all of the other block validation checks dealing with POW and the merkle root, etc...
-                // we merely note with this informational log message when unexpected data is encountered.
-                // we could also be experiencing a storage system read error, or a read of a previous bad write. these are possible, but
-                // less likely scenarios. we don't have enough information to tell a difference here.
-                // the reindex process is not the place to attempt to clean and/or compact the block files. if so desired, a studious node operator
-                // may use knowledge of the fact that the block files are not entirely pristine in order to prepare a set of pristine, and
-                // perhaps ordered, block files for later reindexing.
-                LogDebug(BCLog::REINDEX, "%s: unexpected data at file offset 0x%x - %s. continuing\n", __func__, (nRewind - 1), e.what());
+                LogDebug(
+                    BCLog::REINDEX,
+                    "%s: unexpected data at file offset 0x%x - %s. continuing\n",
+                    __func__,
+                    (nRewind - 1),
+                    e.what()
+                );
             }
         }
     } catch (const std::runtime_error& e) {
-        GetNotifications().fatalError(strprintf(_("System error while loading external block file: %s"), e.what()));
+        GetNotifications().fatalError(
+            strprintf(
+                _("System error while loading external block file: %s"),
+                e.what()
+            )
+        );
     }
-    LogInfo("Loaded %i blocks from external file in %dms", nLoaded, Ticks<std::chrono::milliseconds>(SteadyClock::now() - start));
+
+    LogInfo(
+        "Loaded %i blocks from external file in %dms",
+        nLoaded,
+        Ticks<std::chrono::milliseconds>(SteadyClock::now() - start)
+    );
 }
 
 bool ChainstateManager::ShouldCheckBlockIndex() const
@@ -5601,21 +5878,21 @@ Chainstate& ChainstateManager::InitializeChainstate(CTxMemPool* mempool)
     }
 
     std::string path_str = fs::PathToString(db_path);
-    LogInfo("Removing leveldb dir at %s\n", path_str);
+    LogInfo("Removing database dir at %s\n", path_str);
 
-    // We have to destruct before this call leveldb::DB in order to release the db
-    // lock, otherwise `DestroyDB` will fail. See `leveldb::~DBImpl()`.
+    // The database handle must be destructed before this call in order to release
+    // the database lock; otherwise `DestroyDB` will fail.
     const bool destroyed = DestroyDB(path_str);
 
     if (!destroyed) {
-        LogError("leveldb DestroyDB call failed on %s", path_str);
+        LogError("RocksDB DestroyDB call failed on %s", path_str);
     }
 
     // Datadir should be removed from filesystem; otherwise initialization may detect
     // it on subsequent statups and get confused.
     //
     // If the base_blockhash_path removal above fails in the case of snapshot
-    // chainstates, this will return false since leveldb won't remove a non-empty
+    // chainstates, this will return false since database cleanup will not remove a non-empty
     // directory.
     return destroyed && !fs::exists(db_path);
 }
@@ -5712,11 +5989,11 @@ util::Result<CBlockIndex*> ChainstateManager::ActivateSnapshot(
     auto cleanup_bad_snapshot = [&](bilingual_str reason) EXCLUSIVE_LOCKS_REQUIRED(::cs_main) {
         this->MaybeRebalanceCaches();
 
-        // PopulateAndValidateSnapshot can return (in error) before the leveldb datadir
+        // PopulateAndValidateSnapshot can return (in error) before the database directory
         // has been created, so only attempt removal if we got that far.
         if (auto snapshot_datadir = node::FindAssumeutxoChainstateDir(m_options.datadir)) {
-            // We have to destruct leveldb::DB in order to release the db lock, otherwise
-            // DestroyDB() (in DeleteCoinsDBFromDisk()) will fail. See `leveldb::~DBImpl()`.
+            // The database handle must be destructed in order to release the database lock;
+            // otherwise DestroyDB() (in DeleteCoinsDBFromDisk()) will fail.
             // Destructing the chainstate (and so resetting the coinsviews object) does this.
             snapshot_chainstate.reset();
             bool removed = DeleteCoinsDBFromDisk(*snapshot_datadir, /*is_snapshot=*/true);
@@ -6091,7 +6368,7 @@ SnapshotCompletionResult ChainstateManager::MaybeValidateSnapshot(Chainstate& va
     // assumeutxo hash we expect.
     //
     // TODO: For belt-and-suspenders, we could cache the UTXO set
-    // hash for the snapshot when it's loaded in its chainstate's leveldb. We could then
+    // hash for the snapshot when it's loaded in its chainstate database. We could then
     // reference that here for an additional check.
     if (AssumeutxoHash{validated_cs_stats->hashSerialized} != au_data.hash_serialized) {
         LogWarning("[snapshot] hash mismatch: actual=%s, expected=%s",
@@ -6324,7 +6601,7 @@ bool ChainstateManager::ValidatedSnapshotCleanup(Chainstate& validated_cs, Chain
     const fs::path assumed_valid_path{unvalidated_cs.StoragePath()};
     const fs::path delete_path{validated_path + "_todelete"};
 
-    // Since we're going to be moving around the underlying leveldb filesystem content
+    // Since we're going to be moving around the underlying database filesystem contents
     // for each chainstate, make sure that the chainstates (and their constituent
     // CoinsViews members) have been destructed first.
     //
@@ -6344,7 +6621,7 @@ bool ChainstateManager::ValidatedSnapshotCleanup(Chainstate& validated_cs, Chain
                   fs::PathToString(p_old), fs::PathToString(p_new), err.what());
         GetNotifications().fatalError(strprintf(_(
             "Rename of '%s' -> '%s' failed. "
-            "Cannot clean up the background chainstate leveldb directory."),
+            "Cannot clean up the background chainstate database directory."),
             fs::PathToString(p_old), fs::PathToString(p_new)));
     };
 

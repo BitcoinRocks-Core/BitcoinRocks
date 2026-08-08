@@ -177,7 +177,7 @@ QT_TRANSLATE_NOOP("bitcoin-core", "Prune mode is incompatible with -txospenderin
 QT_TRANSLATE_NOOP("bitcoin-core", "Prune: last wallet synchronisation goes beyond pruned data. You need to -reindex (download the whole blockchain again in case of a pruned node)"),
 QT_TRANSLATE_NOOP("bitcoin-core", "Pruning blockstore…"),
 QT_TRANSLATE_NOOP("bitcoin-core", "Reducing -maxconnections from %d to %d, because of system limitations."),
-QT_TRANSLATE_NOOP("bitcoin-core", "Rename of '%s' -> '%s' failed. Cannot clean up the background chainstate leveldb directory."),
+QT_TRANSLATE_NOOP("bitcoin-core", "Rename of '%s' -> '%s' failed. Cannot clean up the background chainstate database directory."),
 QT_TRANSLATE_NOOP("bitcoin-core", "Rename of '%s' -> '%s' failed. You should resolve this by manually moving or deleting the invalid snapshot directory %s, otherwise you will encounter the same error again on the next startup."),
 QT_TRANSLATE_NOOP("bitcoin-core", "Replaying blocks…"),
 QT_TRANSLATE_NOOP("bitcoin-core", "Rescanning…"),

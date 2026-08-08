@@ -201,6 +201,14 @@ protected:
     // is added or removed from the mempool for any reason.
     mutable uint64_t m_sequence_number GUARDED_BY(cs){1};
 
+    /**
+     * BitcoinRocks policy rejections recorded since this node process
+     * started. These counters are not persisted across restarts.
+     */
+    uint64_t m_policy_rejections_total GUARDED_BY(cs){0};
+    std::map<std::string, uint64_t>
+        m_policy_rejections_by_reason GUARDED_BY(cs);
+
     void trackPackageRemoved(const CFeeRate& rate) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     bool m_load_tried GUARDED_BY(cs){false};
@@ -299,6 +307,30 @@ public:
     using Options = kernel::MemPoolOptions;
 
     const Options m_opts;
+
+    /**
+     * Record one transaction rejection caused specifically by the
+     * configured BitcoinRocks transaction policy.
+     */
+    void RecordPolicyRejection(const std::string& reason)
+        EXCLUSIVE_LOCKS_REQUIRED(cs)
+    {
+        ++m_policy_rejections_total;
+        ++m_policy_rejections_by_reason[reason];
+    }
+
+    uint64_t GetPolicyRejectionCount() const
+        EXCLUSIVE_LOCKS_REQUIRED(cs)
+    {
+        return m_policy_rejections_total;
+    }
+
+    std::map<std::string, uint64_t>
+    GetPolicyRejectionsByReason() const
+        EXCLUSIVE_LOCKS_REQUIRED(cs)
+    {
+        return m_policy_rejections_by_reason;
+    }
 
     /** Create a new CTxMemPool.
      * Sanity checks will be off by default for performance, because otherwise

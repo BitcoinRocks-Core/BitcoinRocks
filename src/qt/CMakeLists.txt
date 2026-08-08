@@ -149,7 +149,6 @@ target_link_libraries(bitcoinqt
   PRIVATE
     core_interface
     bitcoin_cli
-    leveldb
     Boost::headers
     $<TARGET_NAME_IF_EXISTS:QRencode::QRencode>
     $<$<PLATFORM_ID:Darwin>:-framework\ AppKit>

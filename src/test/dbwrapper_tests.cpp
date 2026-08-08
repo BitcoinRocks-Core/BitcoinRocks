@@ -243,7 +243,7 @@ BOOST_AUTO_TEST_CASE(existing_data_no_obfuscate)
     BOOST_CHECK(dbw->Read(key, res));
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
-    // Call the destructor to free leveldb LOCK
+    // Call the destructor to release the database LOCK
     dbw.reset();
 
     // Now, set up another wrapper that wants to obfuscate the same directory
@@ -284,7 +284,7 @@ BOOST_AUTO_TEST_CASE(existing_data_reindex)
     BOOST_CHECK(dbw->Read(key, res));
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
-    // Call the destructor to free leveldb LOCK
+    // Call the destructor to release the database LOCK
     dbw.reset();
 
     // Simulate a -reindex by wiping the existing data store

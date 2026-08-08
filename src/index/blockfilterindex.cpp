@@ -41,8 +41,8 @@
  * indexed by block hash. This ensures that filter data for any block that becomes part of the
  * active chain can always be retrieved, alleviating timing concerns.
  *
- * The filters themselves are stored in flat files and referenced by the LevelDB entries. This
- * minimizes the amount of data written to LevelDB and keeps the database values constant size. The
+ * The filters themselves are stored in flat files and referenced by database entries. This
+ * minimizes the amount of data written to the database and keeps the database values constant size. The
  * disk location of the next block filter to be written (represented as a FlatFilePos) is stored
  * under the DB_FILTER_POS key.
  *
@@ -85,7 +85,13 @@ BlockFilterIndex::BlockFilterIndex(std::unique_ptr<interfaces::Chain> chain, Blo
     fs::path path = gArgs.GetDataDirNet() / "indexes" / "blockfilter" / fs::u8path(filter_name);
     fs::create_directories(path);
 
-    m_db = std::make_unique<BaseIndex::DB>(path / "db", n_cache_size, f_memory, f_wipe);
+    m_db = std::make_unique<BaseIndex::DB>(
+        path / "db",
+        n_cache_size,
+        f_memory,
+        f_wipe,
+        /*f_obfuscate=*/false,
+        DBProfile::BLOCK_FILTER_INDEX);
     m_filter_fileseq = std::make_unique<FlatFileSeq>(std::move(path), "fltr", FLTR_FILE_CHUNK_SIZE);
 }
 

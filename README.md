@@ -1,79 +1,168 @@
-Bitcoin Core integration/staging tree
-=====================================
+BitcoinRocks
+============
 
-https://bitcoincore.org
+https://github.com/BitcoinRocks-Core/BitcoinRocks
 
-For an immediately usable, binary version of the Bitcoin Core software, see
-https://bitcoincore.org/en/download/.
+BitcoinRocks is a Bitcoin full-node implementation derived from Bitcoin Core,
+with a focus on database performance, storage efficiency, node configurability,
+and selected forward-looking performance improvements.
 
-What is Bitcoin Core?
+BitcoinRocks v31.1.1 is based on Bitcoin Core v31.1 and remains compatible with
+the Bitcoin network and Bitcoin consensus rules.
+
+This initial BitcoinRocks release is provided as source code. Pre-built release
+binaries are not currently provided.
+
+What is BitcoinRocks?
 ---------------------
 
-Bitcoin Core connects to the Bitcoin peer-to-peer network to download and fully
-validate blocks and transactions. It also includes a wallet and graphical user
-interface, which can be optionally built.
+BitcoinRocks connects to the Bitcoin peer-to-peer network to download and fully
+validate blocks and transactions. It also includes the Bitcoin wallet, RPC
+interface, command-line utilities, and graphical user interface.
 
-Further information about Bitcoin Core is available in the [doc folder](/doc).
+BitcoinRocks is not a separate cryptocurrency and does not define a separate
+blockchain. It is an alternative Bitcoin node implementation built from the
+Bitcoin Core codebase.
 
-License
--------
+The primary changes in BitcoinRocks v31.1.1 include:
 
-Bitcoin Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
-information or see https://opensource.org/license/MIT.
+- Replacement of the LevelDB database backend with RocksDB.
+- Hardware-aware automatic database-cache configuration.
+- Workload-specific RocksDB tuning for chainstate and optional indexes.
+- LZ4 and Zstandard compression within the RocksDB storage backend.
+- Zstandard-compressed `blk*.dat` block records with transparent raw-record
+  compatibility and fallback when compression is not beneficial.
+- Reduced disk usage for blockchain and index storage.
+- Parallel block-input prevout fetching during block validation, backported
+  from post-v31.1 Bitcoin Core development.
+- User-selectable transaction relay policy profiles.
+- BitcoinRocks-specific branding, configuration naming, and application
+  integration.
 
-Development Process
--------------------
+Further technical information is available in the [doc folder](doc/).
 
-The `master` branch is regularly built (see `doc/build-*.md` for instructions) and tested, but it is not guaranteed to be
-completely stable. [Tags](https://github.com/bitcoin/bitcoin/tags) are created
-regularly from release branches to indicate new official, stable release versions of Bitcoin Core.
+BitcoinRocks-Specific Documentation
+-----------------------------------
 
-The https://github.com/bitcoin-core/gui repository is used exclusively for the
-development of the GUI. Its master branch is identical in all monotree
-repositories. Release branches and tags do not exist, so please do not fork
-that repository unless it is for development reasons.
+The following documents describe significant BitcoinRocks-specific behavior:
 
-The contribution workflow is described in [CONTRIBUTING.md](CONTRIBUTING.md)
-and useful hints for developers can be found in [doc/developer-notes.md](doc/developer-notes.md).
+- [RocksDB automatic configuration](doc/BitcoinRocks-RocksDB-AutoConfig-Documentation.md)
+- [BitcoinRocks v31.1.1 disk storage comparison](doc/BitcoinRocks-31.1.1-Disk-Storage-Usage-Comparison-Results.md)
+- [Parallel prevout fetching](doc/BitcoinRocks-Parallel-Prevout-Fetch.md)
+- [User policy settings](doc/BitcoinRocks-User-Policy-Settings.md)
+
+RocksDB and Build Dependencies
+------------------------------
+
+BitcoinRocks replaces Bitcoin Core's LevelDB backend with RocksDB and uses LZ4
+and Zstandard as part of its database and block-storage implementation.
+
+Users building BitcoinRocks from source are strongly encouraged to use the
+BitcoinRocks Depends system. The source tree specifies the RocksDB, LZ4, and
+Zstandard versions and build configuration against which BitcoinRocks is
+developed and tested.
+
+See the platform-specific build documentation in the [doc folder](doc/) and
+the [depends documentation](depends/README.md) for additional information.
+
+Configuration
+-------------
+
+The primary BitcoinRocks configuration file is:
+
+    bitcoinrocks.conf
+
+BitcoinRocks retains the familiar Bitcoin Core configuration model and
+command-line option format while adding BitcoinRocks-specific functionality.
+
+Database memory is automatically selected according to available system
+resources when `dbcache` is not explicitly configured. Users who prefer a
+manual database-memory budget may continue to set `dbcache` explicitly.
+
+See the
+[RocksDB automatic configuration documentation](doc/BitcoinRocks-RocksDB-AutoConfig-Documentation.md)
+for details.
+
+Development
+-----------
+
+The `main` branch contains the current BitcoinRocks development and release
+history.
+
+Official source release points are identified with version tags such as:
+
+    v31.1.1
+
+BitcoinRocks is derived from Bitcoin Core and continues to incorporate relevant
+upstream Bitcoin Core development while maintaining the BitcoinRocks-specific
+storage, database, performance, policy, and application changes.
+
+The contribution workflow is described in
+[CONTRIBUTING.md](CONTRIBUTING.md), and developer information can be found in
+[doc/developer-notes.md](doc/developer-notes.md).
 
 Testing
 -------
 
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
+BitcoinRocks inherits Bitcoin Core's extensive unit, functional, fuzz, and
+integration testing infrastructure and adds or modifies tests where required
+for BitcoinRocks-specific functionality.
 
-### Automated Testing
+Unit tests can be compiled and executed with CTest when tests were enabled
+during build configuration:
 
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled during the generation of the build system) with: `ctest`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
+    ctest
 
-There are also [regression and integration tests](/test), written
-in Python.
-These tests can be run (if the [test dependencies](/test) are installed) with: `build/test/functional/test_runner.py`
-(assuming `build` is your build directory).
+Further information about unit tests is available in
+[src/test/README.md](src/test/README.md).
 
-The CI (Continuous Integration) systems make sure that every pull request is tested on Windows, Linux, and macOS.
-The CI must pass on all commits before merge to avoid unrelated CI failures on new pull requests.
+Functional and integration tests are located under [test/](test/) and can be
+run using the functional test runner from the configured build tree.
 
-### Manual Quality Assurance (QA) Testing
+BitcoinRocks modifies security-critical Bitcoin software. Changes should be
+reviewed and tested carefully, particularly changes affecting validation,
+database handling, transaction policy, block storage, or wallet behavior.
 
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
+Upstream Bitcoin Core
+---------------------
 
-Translations
-------------
+BitcoinRocks is derived from the Bitcoin Core project:
 
-Changes to translations as well as new translations can be submitted to
-[Bitcoin Core's Transifex page](https://explore.transifex.com/bitcoin/bitcoin/).
+https://bitcoincore.org
 
-Translations are periodically pulled from Transifex and merged into the git repository. See the
-[translation process](doc/translation_process.md) for details on how this works.
+Bitcoin Core source code is available at:
 
-**Important**: We do not accept translation changes as GitHub pull requests because the next
-pull from Transifex would automatically overwrite them again.
+https://github.com/bitcoin/bitcoin
+
+BitcoinRocks retains substantial Bitcoin Core code, documentation, testing
+infrastructure, and copyright attribution.
+
+License
+-------
+
+BitcoinRocks is released under the terms of the MIT license.
+
+See [COPYING](COPYING) for the full license text or:
+
+https://opensource.org/license/MIT
+
+Source Repository
+-----------------
+
+The official BitcoinRocks source repository is:
+
+https://github.com/BitcoinRocks-Core/BitcoinRocks
+
+Issues and source-development reports may be submitted through:
+
+https://github.com/BitcoinRocks-Core/BitcoinRocks/issues
+
+Donations
+---------
+
+If you have found BitcoinRocks to be useful to yourself, your organization, or
+to the broader Bitcoin ecosystem, please consider assisting in furthering the
+development and maintenance of BitcoinRocks by helping the developer stay in a
+steady supply of coffee.
+
+BTC: 1A1gc5mi9N4Dth7QVCiffF2Cuy1yXAadbp

@@ -122,8 +122,31 @@ static const unsigned int UNDOFILE_CHUNK_SIZE = 0x100000; // 1 MiB
 /** The maximum size of a blk?????.dat file (since 0.8) */
 static const unsigned int MAX_BLOCKFILE_SIZE = 0x8000000; // 128 MiB
 
-/** Size of header written by WriteBlock before a serialized CBlock (8 bytes) */
-static constexpr uint32_t STORAGE_HEADER_BYTES{std::tuple_size_v<MessageStartChars> + sizeof(unsigned int)};
+/** Size of the record header written before each block payload (8 bytes). */
+static constexpr uint32_t STORAGE_HEADER_BYTES{std::tuple_size_v<MessageStartChars> + sizeof(uint32_t)};
+
+/**
+ * BitcoinRocks compressed block record format.
+ *
+ * The high bit of the existing 32-bit size field marks a ZSTD-compressed
+ * payload. The remaining 31 bits contain the physical payload length.
+ * An unset high bit retains compatibility with raw Bitcoin Core block records.
+ */
+static constexpr uint32_t BLOCK_STORAGE_COMPRESSED_FLAG{uint32_t{1} << 31};
+static constexpr uint32_t BLOCK_STORAGE_SIZE_MASK{~BLOCK_STORAGE_COMPRESSED_FLAG};
+
+constexpr bool IsCompressedBlockRecord(uint32_t size_field)
+{
+    return (size_field & BLOCK_STORAGE_COMPRESSED_FLAG) != 0;
+}
+
+constexpr uint32_t GetBlockRecordPayloadSize(uint32_t size_field)
+{
+    return size_field & BLOCK_STORAGE_SIZE_MASK;
+}
+
+/** Decompress one independent ZSTD block frame. Throws on malformed data. */
+std::vector<std::byte> DecompressBlockPayload(std::span<const std::byte> compressed);
 
 /** Total overhead when writing undo data: header (8 bytes) plus checksum (32 bytes) */
 static constexpr uint32_t UNDO_DATA_DISK_OVERHEAD{STORAGE_HEADER_BYTES + uint256::size()};

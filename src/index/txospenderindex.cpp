@@ -37,7 +37,7 @@
  * and return it if it does spend the provided outpoint.
  */
 
-// LevelDB key prefix. We only have one key for now but it will make it easier to add others if needed.
+// Database key prefix. We only have one key for now but it will make it easier to add others if needed.
 constexpr uint8_t DB_TXOSPENDERINDEX{'s'};
 
 std::unique_ptr<TxoSpenderIndex> g_txospenderindex;
@@ -61,7 +61,14 @@ struct DBKey {
 };
 
 TxoSpenderIndex::TxoSpenderIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
-    : BaseIndex(std::move(chain), "txospenderindex"), m_db{std::make_unique<DB>(gArgs.GetDataDirNet() / "indexes" / "txospenderindex" / "db", n_cache_size, f_memory, f_wipe)}
+    : BaseIndex(std::move(chain), "txospenderindex"),
+      m_db{std::make_unique<DB>(
+          gArgs.GetDataDirNet() / "indexes" / "txospenderindex" / "db",
+          n_cache_size,
+          f_memory,
+          f_wipe,
+          /*f_obfuscate=*/false,
+          DBProfile::TX_INDEX)}
 {
     if (!m_db->Read("siphash_key", m_siphash_key)) {
         FastRandomContext rng(false);
@@ -141,20 +148,40 @@ bool TxoSpenderIndex::CustomRemove(const interfaces::BlockInfo& block)
 
 util::Expected<TxoSpender, std::string> TxoSpenderIndex::ReadTransaction(const CDiskTxPos& tx_pos) const
 {
-    AutoFile file{m_chainstate->m_blockman.OpenBlockFile(tx_pos, /*fReadOnly=*/true)};
-    if (file.IsNull()) {
-        return util::Unexpected("cannot open block");
+    const auto block_data{m_chainstate->m_blockman.ReadRawBlock(tx_pos)};
+    if (!block_data) {
+        return util::Unexpected{"cannot read block"};
     }
+
+    const std::span<const std::byte> raw{
+        block_data->data(),
+        block_data->size()
+    };
+
     CBlockHeader header;
     TxoSpender spender;
+
     try {
-        file >> header;
-        file.seek(tx_pos.nTxOffset, SEEK_CUR);
-        file >> TX_WITH_WITNESS(spender.tx);
+        SpanReader{raw} >> header;
+
+        const size_t transaction_position{
+            GetSerializeSize(header) +
+            static_cast<size_t>(tx_pos.nTxOffset)
+        };
+
+        if (transaction_position >= raw.size()) {
+            return util::Unexpected{
+                "txospenderindex offset exceeds decompressed block size"
+            };
+        }
+
+        SpanReader{raw.subspan(transaction_position)} >>
+            TX_WITH_WITNESS(spender.tx);
+
         spender.block_hash = header.GetHash();
         return spender;
     } catch (const std::exception& e) {
-        return util::Unexpected(e.what());
+        return util::Unexpected{e.what()};
     }
 }
 

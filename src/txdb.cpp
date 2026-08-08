@@ -52,10 +52,16 @@ struct CoinEntry {
     SERIALIZE_METHODS(CoinEntry, obj) { READWRITE(obj.key, obj.outpoint->hash, VARINT(obj.outpoint->n)); }
 };
 
+DBParams WithChainstateProfile(DBParams params)
+{
+    params.profile = DBProfile::CHAINSTATE;
+    return params;
+}
+
 } // namespace
 
 CCoinsViewDB::CCoinsViewDB(DBParams db_params, CoinsViewOptions options) :
-    m_db_params{std::move(db_params)},
+    m_db_params{WithChainstateProfile(std::move(db_params))},
     m_options{std::move(options)},
     m_db{std::make_unique<CDBWrapper>(m_db_params)} { }
 
@@ -234,7 +240,7 @@ std::unique_ptr<CCoinsViewCursor> CCoinsViewDB::Cursor() const
 {
     auto i = std::make_unique<CCoinsViewDBCursor>(
         const_cast<CDBWrapper&>(*m_db).NewIterator(), GetBestBlock());
-    /* It seems that there are no "const iterators" for LevelDB.  Since we
+    /* The database wrapper does not expose const iterators.  Since we
        only need read operations on it, use a const-cast to get around
        that restriction.  */
     i->pcursor->Seek(DB_COIN);

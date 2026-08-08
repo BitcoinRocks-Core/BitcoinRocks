@@ -888,7 +888,7 @@ Coin MakeCoin()
 
 
 //! For CCoinsViewCache instances backed by either another cache instance or
-//! leveldb, test cache behavior and flag state (DIRTY/FRESH) by
+//! database, test cache behavior and flag state (DIRTY/FRESH) by
 //!
 //! 1. Adding a random coin to the child-most cache,
 //! 2. Flushing all caches (without erasing),
@@ -1049,7 +1049,7 @@ void TestFlushBehavior(
 
 BOOST_FIXTURE_TEST_CASE(ccoins_flush_behavior, FlushTest)
 {
-    // Create two in-memory caches atop a leveldb view.
+    // Create two in-memory caches atop a database view.
     CCoinsViewDB base{{.path = "test", .cache_bytes = 1 << 23, .memory_only = true}, {}};
     std::vector<std::unique_ptr<CCoinsViewCacheTest>> caches;
     caches.push_back(std::make_unique<CCoinsViewCacheTest>(&base));
@@ -1061,25 +1061,33 @@ BOOST_FIXTURE_TEST_CASE(ccoins_flush_behavior, FlushTest)
     }
 }
 
-BOOST_FIXTURE_TEST_CASE(coins_db_leveldb_layout, FlushTest)
+BOOST_FIXTURE_TEST_CASE(coins_db_compaction, FlushTest)
 {
-    auto level2_files{[](CCoinsViewDB& base) {
-        return *Assert(ToIntegral<int>(*Assert(base.GetDBProperty("leveldb.num-files-at-level2"))));
-    }};
     const COutPoint outpoint{Txid::FromUint256(m_rng.rand256()), 0};
     const Coin coin{MakeCoin()};
     const uint256 block_hash{m_rng.rand256()};
 
-    CCoinsViewDB base{{.path = m_args.GetDataDirBase() / "coins_db_leveldb_layout", .cache_bytes = 1_MiB, .wipe_data = true}, {}};
+    CCoinsViewDB base{{
+        .path = m_args.GetDataDirBase() / "coins_db_compaction",
+        .cache_bytes = 1_MiB,
+        .wipe_data = true
+    }, {}};
+
     CCoinsViewCache cache{&base};
 
-    cache.EmplaceCoinInternalDANGER(COutPoint{outpoint}, Coin{coin});
+    cache.EmplaceCoinInternalDANGER(
+        COutPoint{outpoint},
+        Coin{coin}
+    );
     cache.SetBestBlock(block_hash);
     cache.Sync();
 
-    BOOST_CHECK_EQUAL(level2_files(base), 0);
+    // Verify database contents before compaction.
+    BOOST_CHECK(*Assert(base.GetCoin(outpoint)) == coin);
+    BOOST_CHECK_EQUAL(base.GetBestBlock(), block_hash);
+
+    // Full compaction must preserve the logical database contents.
     WITH_LOCK(::cs_main, return base.CompactFull()).wait();
-    BOOST_CHECK_EQUAL(level2_files(base), 1);
 
     BOOST_CHECK(*Assert(base.GetCoin(outpoint)) == coin);
     BOOST_CHECK_EQUAL(base.GetBestBlock(), block_hash);

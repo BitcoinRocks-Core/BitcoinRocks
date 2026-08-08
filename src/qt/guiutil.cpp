@@ -447,7 +447,15 @@ bool openBitcoinConf()
 
     configFile.close();
 
-    /* Open bitcoin.conf with the associated application */
+    /* Open the configuration file with the associated application. */
+#ifdef Q_OS_LINUX
+    // Some Linux desktop environments successfully open the file while
+    // QDesktopServices::openUrl() nevertheless reports failure.
+    QDesktopServices::openUrl(
+        QUrl::fromLocalFile(PathToQString(pathConfig))
+    );
+    return true;
+#else
     bool res = QDesktopServices::openUrl(QUrl::fromLocalFile(PathToQString(pathConfig)));
 #ifdef Q_OS_MACOS
     // Workaround for macOS-specific behavior; see #15409.
@@ -455,8 +463,8 @@ bool openBitcoinConf()
         res = QProcess::startDetached("/usr/bin/open", QStringList{"-t", PathToQString(pathConfig)});
     }
 #endif
-
     return res;
+#endif
 }
 
 ToolTipToRichTextFilter::ToolTipToRichTextFilter(int _size_threshold, QObject *parent) :

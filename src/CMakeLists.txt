@@ -16,7 +16,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 # are set, so output locations of subproject tests and libraries are
 # not overridden.
 include(../cmake/crc32c.cmake)
-include(../cmake/leveldb.cmake)
+include(../cmake/rocksdb.cmake)
 include(../cmake/minisketch.cmake)
 add_subdirectory(univalue)
 if (ENABLE_IPC AND NOT WITH_EXTERNAL_LIBMULTIPROCESS)
@@ -278,7 +278,7 @@ target_link_libraries(bitcoin_node
     bitcoin_common
     bitcoin_util
     $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
-    leveldb
+    bitcoinrocks_rocksdb
     minisketch
     univalue
     Boost::headers
@@ -426,3 +426,50 @@ endif()
 if(BUILD_FUZZ_BINARY)
   add_subdirectory(test/fuzz)
 endif()
+
+# Bitcoin Rocks executable output filenames.
+#
+# Keep internal CMake target names unchanged so existing target
+# dependencies, generated expressions, tests, and install rules continue
+# to work. Only the actual executable filenames are changed.
+function(bitcoinrocks_set_executable_name target_name output_name)
+  if(TARGET "${target_name}")
+    set_target_properties(
+      "${target_name}"
+      PROPERTIES OUTPUT_NAME "${output_name}"
+    )
+  endif()
+endfunction()
+
+# Runtime and command-line executables.
+bitcoinrocks_set_executable_name(bitcoin bitcoinrocks)
+bitcoinrocks_set_executable_name(bitcoind bitcoinrocksd)
+bitcoinrocks_set_executable_name(bitcoin-node bitcoinrocks-node)
+bitcoinrocks_set_executable_name(bitcoin-qt bitcoinrocks-qt)
+bitcoinrocks_set_executable_name(bitcoin-gui bitcoinrocks-gui)
+bitcoinrocks_set_executable_name(bitcoin-cli bitcoinrocks-cli)
+bitcoinrocks_set_executable_name(bitcoin-tx bitcoinrocks-tx)
+bitcoinrocks_set_executable_name(bitcoin-util bitcoinrocks-util)
+bitcoinrocks_set_executable_name(bitcoin-wallet bitcoinrocks-wallet)
+bitcoinrocks_set_executable_name(
+  bitcoin-chainstate
+  bitcoinrocks-chainstate
+)
+
+# BitcoinRocks-owned test and development executables.
+bitcoinrocks_set_executable_name(test_bitcoin test_bitcoinrocks)
+bitcoinrocks_set_executable_name(
+  test_bitcoin-qt
+  test_bitcoinrocks-qt
+)
+bitcoinrocks_set_executable_name(
+  bench_bitcoin
+  bench_bitcoinrocks
+)
+bitcoinrocks_set_executable_name(fuzz bitcoinrocks-fuzz)
+bitcoinrocks_set_executable_name(
+  kernel-test
+  bitcoinrocks-kernel-test
+)
+
+unset(bitcoinrocks_set_executable_name)

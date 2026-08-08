@@ -57,13 +57,13 @@ public:
     bool NeedsUpgrade();
     size_t EstimateSize() const override;
 
-    //! Dynamically alter the underlying leveldb cache size.
+    //! Dynamically alter the underlying database cache size.
     void ResizeCache(size_t new_cache_size) EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_db_mutex);
 
-    //! Perform a full compaction of the underlying LevelDB on a one-shot background thread.
+    //! Perform a full compaction of the underlying database on a one-shot background thread.
     std::shared_future<void> CompactFull() EXCLUSIVE_LOCKS_REQUIRED(cs_main, !m_db_mutex);
 
-    //! Return an underlying LevelDB property value, if available.
+    //! Return an underlying database property value, if available.
     std::optional<std::string> GetDBProperty(const std::string& property);
 };
 

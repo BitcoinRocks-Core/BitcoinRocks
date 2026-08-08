@@ -248,92 +248,244 @@ bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
     return true;
 }
 
-bool IsWitnessStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
+static bool HasInscriptionEnvelope(
+    std::span<const unsigned char> script)
 {
-    if (tx.IsCoinBase())
-        return true; // Coinbases are skipped
+    // OP_FALSE OP_IF OP_PUSHBYTES_3 "ord"
+    static constexpr unsigned char marker[]{
+        0x00, 0x63, 0x03, 0x6f, 0x72, 0x64
+    };
 
-    for (unsigned int i = 0; i < tx.vin.size(); i++)
-    {
-        // We don't care if witness for this input is empty, since it must not be bloated.
-        // If the script is invalid without witness, it would be caught sooner or later during validation.
-        if (tx.vin[i].scriptWitness.IsNull())
-            continue;
+    if (script.size() < sizeof(marker)) {
+        return false;
+    }
 
-        const CTxOut &prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
+    for (size_t offset = 0;
+         offset + sizeof(marker) <= script.size();
+         ++offset) {
+        bool match{true};
 
-        // get the scriptPubKey corresponding to this input:
-        CScript prevScript = prev.scriptPubKey;
-
-        // witness stuffing detected
-        if (prevScript.IsPayToAnchor()) {
-            return false;
+        for (size_t index = 0;
+             index < sizeof(marker);
+             ++index) {
+            if (script[offset + index] != marker[index]) {
+                match = false;
+                break;
+            }
         }
 
-        bool p2sh = false;
+        if (match) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsWitnessStandard(
+    const CTransaction& tx,
+    const CCoinsViewCache& mapInputs,
+    const std::optional<unsigned>& max_tapscript_bytes,
+    WitnessStandardnessResult& result)
+{
+    result = {};
+
+    if (tx.IsCoinBase()) {
+        return true;
+    }
+
+    for (unsigned int i = 0; i < tx.vin.size(); ++i) {
+        if (tx.vin[i].scriptWitness.IsNull()) {
+            continue;
+        }
+
+        auto fail = [&](
+            std::string reason,
+            std::optional<uint64_t> actual_size =
+                std::nullopt,
+            std::optional<uint64_t> limit =
+                std::nullopt,
+            bool inscription_like = false) {
+            result.reason = std::move(reason);
+            result.input_index = i;
+            result.actual_size = actual_size;
+            result.limit = limit;
+            result.inscription_like = inscription_like;
+            return false;
+        };
+
+        const CTxOut& prev{
+            mapInputs.AccessCoin(tx.vin[i].prevout).out
+        };
+
+        CScript prevScript{prev.scriptPubKey};
+
+        if (prevScript.IsPayToAnchor()) {
+            return fail("witness-stuffing");
+        }
+
+        bool p2sh{false};
+
         if (prevScript.IsPayToScriptHash()) {
-            std::vector <std::vector<unsigned char> > stack;
-            // If the scriptPubKey is P2SH, we try to extract the redeemScript casually by converting the scriptSig
-            // into a stack. We do not check IsPushOnly nor compare the hash as these will be done later anyway.
-            // If the check fails at this stage, we know that this txid must be a bad one.
-            if (!EvalScript(stack, tx.vin[i].scriptSig, SCRIPT_VERIFY_NONE, BaseSignatureChecker(), SigVersion::BASE))
-                return false;
-            if (stack.empty())
-                return false;
-            prevScript = CScript(stack.back().begin(), stack.back().end());
+            std::vector<std::vector<unsigned char>> stack;
+
+            if (!EvalScript(
+                    stack,
+                    tx.vin[i].scriptSig,
+                    SCRIPT_VERIFY_NONE,
+                    BaseSignatureChecker(),
+                    SigVersion::BASE)) {
+                return fail("p2sh-witness-redeemscript");
+            }
+
+            if (stack.empty()) {
+                return fail("p2sh-witness-empty");
+            }
+
+            prevScript = CScript{
+                stack.back().begin(),
+                stack.back().end()
+            };
             p2sh = true;
         }
 
-        int witnessversion = 0;
+        int witnessversion{0};
         std::vector<unsigned char> witnessprogram;
 
-        // Non-witness program must not be associated with any witness
-        if (!prevScript.IsWitnessProgram(witnessversion, witnessprogram))
-            return false;
+        if (!prevScript.IsWitnessProgram(
+                witnessversion,
+                witnessprogram)) {
+            return fail("witness-on-nonwitness-input");
+        }
 
-        // Check P2WSH standard limits
-        if (witnessversion == 0 && witnessprogram.size() == WITNESS_V0_SCRIPTHASH_SIZE) {
-            if (tx.vin[i].scriptWitness.stack.back().size() > MAX_STANDARD_P2WSH_SCRIPT_SIZE)
-                return false;
-            size_t sizeWitnessStack = tx.vin[i].scriptWitness.stack.size() - 1;
-            if (sizeWitnessStack > MAX_STANDARD_P2WSH_STACK_ITEMS)
-                return false;
-            for (unsigned int j = 0; j < sizeWitnessStack; j++) {
-                if (tx.vin[i].scriptWitness.stack[j].size() > MAX_STANDARD_P2WSH_STACK_ITEM_SIZE)
-                    return false;
+        if (witnessversion == 0 &&
+            witnessprogram.size() ==
+                WITNESS_V0_SCRIPTHASH_SIZE) {
+            const uint64_t script_size{
+                tx.vin[i].scriptWitness.stack.back().size()
+            };
+
+            if (script_size >
+                MAX_STANDARD_P2WSH_SCRIPT_SIZE) {
+                return fail(
+                    "p2wsh-script-size",
+                    script_size,
+                    MAX_STANDARD_P2WSH_SCRIPT_SIZE);
+            }
+
+            const size_t stack_items{
+                tx.vin[i].scriptWitness.stack.size() - 1
+            };
+
+            if (stack_items >
+                MAX_STANDARD_P2WSH_STACK_ITEMS) {
+                return fail(
+                    "p2wsh-stack-items",
+                    stack_items,
+                    MAX_STANDARD_P2WSH_STACK_ITEMS);
+            }
+
+            for (size_t j = 0;
+                 j < stack_items;
+                 ++j) {
+                const uint64_t item_size{
+                    tx.vin[i].scriptWitness.stack[j].size()
+                };
+
+                if (item_size >
+                    MAX_STANDARD_P2WSH_STACK_ITEM_SIZE) {
+                    return fail(
+                        "p2wsh-stack-item-size",
+                        item_size,
+                        MAX_STANDARD_P2WSH_STACK_ITEM_SIZE);
+                }
             }
         }
 
-        // Check policy limits for Taproot spends:
-        // - MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE limit for stack item size
-        // - No annexes
-        if (witnessversion == 1 && witnessprogram.size() == WITNESS_V1_TAPROOT_SIZE && !p2sh) {
-            // Taproot spend (non-P2SH-wrapped, version 1, witness program size 32; see BIP 341)
-            std::span stack{tx.vin[i].scriptWitness.stack};
-            if (stack.size() >= 2 && !stack.back().empty() && stack.back()[0] == ANNEX_TAG) {
-                // Annexes are nonstandard as long as no semantics are defined for them.
-                return false;
+        if (witnessversion == 1 &&
+            witnessprogram.size() ==
+                WITNESS_V1_TAPROOT_SIZE &&
+            !p2sh) {
+            std::span stack{
+                tx.vin[i].scriptWitness.stack
+            };
+
+            if (stack.size() >= 2 &&
+                !stack.back().empty() &&
+                stack.back()[0] == ANNEX_TAG) {
+                return fail("taproot-annex");
             }
+
             if (stack.size() >= 2) {
-                // Script path spend (2 or more stack elements after removing optional annex)
-                const auto& control_block = SpanPopBack(stack);
-                SpanPopBack(stack); // Ignore script
-                if (control_block.empty()) return false; // Empty control block is invalid
-                if ((control_block[0] & TAPROOT_LEAF_MASK) == TAPROOT_LEAF_TAPSCRIPT) {
-                    // Leaf version 0xc0 (aka Tapscript, see BIP 342)
+                const auto& control_block =
+                    SpanPopBack(stack);
+                const auto& tapscript =
+                    SpanPopBack(stack);
+
+                if (control_block.empty()) {
+                    return fail(
+                        "taproot-control-block-empty");
+                }
+
+                const uint64_t tapscript_size{
+                    tapscript.size()
+                };
+
+                const bool inscription_like{
+                    HasInscriptionEnvelope(
+                        std::span<const unsigned char>{
+                            tapscript.data(),
+                            tapscript.size()})
+                };
+
+                // A zero limit rejects every Taproot script-path spend,
+                // including future or unknown leaf versions.
+                if (max_tapscript_bytes &&
+                    *max_tapscript_bytes == 0) {
+                    return fail(
+                        "tapscript-disabled",
+                        tapscript_size,
+                        0,
+                        inscription_like);
+                }
+
+                if ((control_block[0] &
+                     TAPROOT_LEAF_MASK) ==
+                    TAPROOT_LEAF_TAPSCRIPT) {
+                    if (max_tapscript_bytes &&
+                        tapscript_size >
+                            *max_tapscript_bytes) {
+                        return fail(
+                            "tapscript-size",
+                            tapscript_size,
+                            *max_tapscript_bytes,
+                            inscription_like);
+                    }
+
                     for (const auto& item : stack) {
-                        if (item.size() > MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE) return false;
+                        const uint64_t item_size{
+                            item.size()
+                        };
+
+                        if (item_size >
+                            MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE) {
+                            return fail(
+                                "tapscript-stack-item-size",
+                                item_size,
+                                MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE,
+                                inscription_like);
+                        }
                     }
                 }
             } else if (stack.size() == 1) {
-                // Key path spend (1 stack element after removing optional annex)
-                // (no policy rules apply)
+                // Taproot key-path spend.
             } else {
-                // 0 stack elements; this is already invalid by consensus rules
-                return false;
+                return fail("taproot-empty-witness");
             }
         }
     }
+
+    result = {};
     return true;
 }
 

@@ -137,12 +137,12 @@ class InitTest(BitcoinTestFramework):
             },
             {
                 'filepath_glob': 'indexes/txindex/MANIFEST*',
-                'error_message': 'LevelDB error: Corruption: CURRENT points to a non-existent file',
+                'error_message': 'Fatal RocksDB error: Corruption: CURRENT points to a non-existent file',
                 'startup_args': ['-txindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txospenderindex/db/MANIFEST*',
-                'error_message': 'LevelDB error: Corruption: CURRENT points to a non-existent file',
+                'error_message': 'Fatal RocksDB error: Corruption: CURRENT points to a non-existent file',
                 'startup_args': ['-txospenderindex=1'],
             },
             # Removing these files does not result in a startup error:
@@ -168,27 +168,27 @@ class InitTest(BitcoinTestFramework):
             },
             {
                 'filepath_glob': 'indexes/blockfilter/basic/db/*.*',
-                'error_message': 'LevelDB error: Corruption',
+                'error_message': 'Fatal RocksDB error: Corruption',
                 'startup_args': ['-blockfilterindex=1'],
             },
             {
                 'filepath_glob': 'indexes/coinstatsindex/db/*.*',
-                'error_message': 'LevelDB error: Corruption',
+                'error_message': 'Fatal RocksDB error: Corruption',
                 'startup_args': ['-coinstatsindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txindex/*.log',
-                'error_message': 'LevelDB error: Corruption',
+                'error_message': 'Fatal RocksDB error: Corruption',
                 'startup_args': ['-txindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txindex/CURRENT',
-                'error_message': 'LevelDB error: Corruption',
+                'error_message': 'Fatal RocksDB error: Corruption',
                 'startup_args': ['-txindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txospenderindex/db/*',
-                'error_message': 'LevelDB error: Corruption',
+                'error_message': 'Fatal RocksDB error: Corruption',
                 'startup_args': ['-txospenderindex=1'],
             },
             # Perturbing these files does not result in a startup error:

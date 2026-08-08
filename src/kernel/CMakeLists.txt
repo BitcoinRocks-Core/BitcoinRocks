@@ -62,6 +62,7 @@ add_library(bitcoinkernel
   ../uint256.cpp
   ../util/chaintype.cpp
   ../util/check.cpp
+  ../util/exception.cpp
   ../util/expected.cpp
   ../util/feefrac.cpp
   ../util/fs.cpp
@@ -72,6 +73,7 @@ add_library(bitcoinkernel
   ../util/serfloat.cpp
   ../util/signalinterrupt.cpp
   ../util/syserror.cpp
+  ../util/thread.cpp
   ../util/threadnames.cpp
   ../util/time.cpp
   ../util/tokenpipe.cpp
@@ -80,7 +82,6 @@ add_library(bitcoinkernel
   ../versionbits.cpp
   $<TARGET_OBJECTS:bitcoin_clientversion>
   $<TARGET_OBJECTS:bitcoin_crypto>
-  $<TARGET_OBJECTS:leveldb>
   $<TARGET_OBJECTS:crc32c>
 )
 
@@ -95,7 +96,6 @@ endif()
 # Also manually apply the warnings to the kernel's internal dependencies
 target_link_libraries(bitcoin_clientversion PRIVATE kernel_warn_interface)
 target_link_libraries(bitcoin_crypto PRIVATE kernel_warn_interface)
-target_link_libraries(leveldb PRIVATE kernel_warn_interface)
 target_link_libraries(crc32c PRIVATE kernel_warn_interface)
 
 target_link_libraries(bitcoinkernel
@@ -108,7 +108,6 @@ target_link_libraries(bitcoinkernel
     Boost::headers
 )
 
-target_include_directories(bitcoinkernel PRIVATE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/leveldb/include>)
 
 # Add a convenience libbitcoinkernel target as a synonym for bitcoinkernel.
 add_custom_target(libbitcoinkernel)

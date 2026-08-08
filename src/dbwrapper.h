@@ -23,6 +23,16 @@ static const size_t DBWRAPPER_PREALLOC_KEY_SIZE = 64;
 static const size_t DBWRAPPER_PREALLOC_VALUE_SIZE = 1024;
 static const size_t DBWRAPPER_MAX_FILE_SIZE = 32 << 20; // 32 MiB
 
+//! RocksDB workload profile selected by the database caller.
+enum class DBProfile {
+    DEFAULT,
+    BLOCK_INDEX,
+    CHAINSTATE,
+    TX_INDEX,
+    BLOCK_FILTER_INDEX,
+    COINSTATS_INDEX,
+};
+
 //! User-controlled performance and debug options.
 struct DBOptions {
     //! Compact database on startup.
@@ -31,11 +41,13 @@ struct DBOptions {
 
 //! Application-specific storage settings.
 struct DBParams {
-    //! Location in the filesystem where leveldb data will be stored.
+    //! Location in the filesystem where RocksDB data will be stored.
     fs::path path;
-    //! Configures various leveldb cache settings.
+    //! Configures various RocksDB cache settings.
     size_t cache_bytes;
-    //! If true, use leveldb's memory environment.
+    //! Workload-specific RocksDB tuning selected by the caller.
+    DBProfile profile{DBProfile::DEFAULT};
+    //! If true, use an ephemeral RocksDB database.
     bool memory_only = false;
     //! If true, remove all existing data.
     bool wipe_data = false;
@@ -133,7 +145,7 @@ public:
 
     /**
      * @param[in] _parent          Parent CDBWrapper instance.
-     * @param[in] _piter           The original leveldb iterator.
+     * @param[in] _piter           The original RocksDB iterator.
      */
     CDBIterator(const CDBWrapper& _parent, std::unique_ptr<IteratorImpl> _piter);
     ~CDBIterator();
@@ -173,14 +185,14 @@ public:
     }
 };
 
-struct LevelDBContext;
+struct RocksDBContext;
 
 class CDBWrapper
 {
     friend const Obfuscation& dbwrapper_private::GetObfuscation(const CDBWrapper&);
 private:
-    //! holds all leveldb-specific fields of this class
-    std::unique_ptr<LevelDBContext> m_db_context;
+    //! holds all RocksDB-specific fields of this class
+    std::unique_ptr<RocksDBContext> m_db_context;
 
     //! the name of this database
     std::string m_name;
@@ -250,13 +262,13 @@ public:
 
     void WriteBatch(CDBBatch& batch, bool fSync = false);
 
-    //! Perform a blocking full compaction of the underlying LevelDB.
+    //! Perform a blocking full compaction of the underlying RocksDB.
     void CompactFull();
 
-    //! Return a LevelDB property value, if available.
+    //! Return a RocksDB property value, if available.
     std::optional<std::string> GetProperty(const std::string& property) const;
 
-    // Get an estimate of LevelDB memory usage (in bytes).
+    // Get an estimate of RocksDB memory usage (in bytes).
     size_t DynamicMemoryUsage() const;
 
     CDBIterator* NewIterator();

@@ -175,3 +175,11 @@ else()
   set(CAPNP_EXECUTABLE "${CMAKE_CURRENT_LIST_DIR}/native/bin/capnp" CACHE FILEPATH "")
   set(CAPNPC_CXX_EXECUTABLE "${CMAKE_CURRENT_LIST_DIR}/native/bin/capnpc-c++" CACHE FILEPATH "")
 endif()
+
+# BitcoinRocks: prevent builder-private runtime paths
+#
+# Depends may provide shared build-time libraries for selected host
+# runtime dependencies, such as Fontconfig and FreeType. Linking may
+# use their absolute Depends paths, but generated executables must
+# resolve their SONAMEs from the target system at runtime.
+set(CMAKE_SKIP_BUILD_RPATH ON CACHE BOOL "" FORCE)

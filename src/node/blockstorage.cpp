@@ -40,6 +40,7 @@
 #include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
+#include <zstd.h>
 
 #include <cerrno>
 #include <compare>
@@ -170,6 +171,88 @@ std::string CBlockFileInfo::ToString() const
 } // namespace kernel
 
 namespace node {
+
+namespace {
+
+static constexpr int BLOCK_STORAGE_ZSTD_LEVEL{9};
+static constexpr size_t BLOCK_STORAGE_MIN_SAVINGS{64};
+
+std::vector<std::byte> CompressBlockPayload(std::span<const std::byte> raw)
+{
+    const size_t bound{ZSTD_compressBound(raw.size())};
+    if (bound > BLOCK_STORAGE_SIZE_MASK) {
+        throw std::runtime_error{"ZSTD compression bound exceeds block-record size field"};
+    }
+
+    std::vector<std::byte> compressed(bound);
+    const size_t result{
+        ZSTD_compress(
+            compressed.data(),
+            compressed.size(),
+            raw.data(),
+            raw.size(),
+            BLOCK_STORAGE_ZSTD_LEVEL
+        )
+    };
+
+    if (ZSTD_isError(result)) {
+        throw std::runtime_error{
+            strprintf("ZSTD block compression failed: %s", ZSTD_getErrorName(result))
+        };
+    }
+
+    compressed.resize(result);
+    return compressed;
+}
+
+} // namespace
+
+std::vector<std::byte> DecompressBlockPayload(std::span<const std::byte> compressed)
+{
+    const unsigned long long frame_size{
+        ZSTD_getFrameContentSize(compressed.data(), compressed.size())
+    };
+
+    if (frame_size == ZSTD_CONTENTSIZE_ERROR) {
+        throw std::runtime_error{"Invalid ZSTD block frame"};
+    }
+    if (frame_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+        throw std::runtime_error{"ZSTD block frame does not declare its decompressed size"};
+    }
+    if (frame_size < 80 || frame_size > MAX_SIZE) {
+        throw std::runtime_error{
+            strprintf("Invalid decompressed block size: %u", frame_size)
+        };
+    }
+
+    std::vector<std::byte> raw(static_cast<size_t>(frame_size));
+    const size_t result{
+        ZSTD_decompress(
+            raw.data(),
+            raw.size(),
+            compressed.data(),
+            compressed.size()
+        )
+    };
+
+    if (ZSTD_isError(result)) {
+        throw std::runtime_error{
+            strprintf("ZSTD block decompression failed: %s", ZSTD_getErrorName(result))
+        };
+    }
+    if (result != raw.size()) {
+        throw std::runtime_error{
+            strprintf(
+                "ZSTD block decompressed to unexpected size: %u instead of %u",
+                result,
+                raw.size()
+            )
+        };
+    }
+
+    return raw;
+}
+
 
 bool CBlockIndexWorkComparator::operator()(const CBlockIndex* pa, const CBlockIndex* pb) const
 {
@@ -1083,83 +1166,182 @@ bool BlockManager::ReadBlock(CBlock& block, const CBlockIndex& index) const
 BlockManager::ReadRawBlockResult BlockManager::ReadRawBlock(const FlatFilePos& pos, std::optional<std::pair<size_t, size_t>> block_part) const
 {
     if (pos.nPos < STORAGE_HEADER_BYTES) {
-        // If nPos is less than STORAGE_HEADER_BYTES, we can't read the header that precedes the block data
-        // This would cause an unsigned integer underflow when trying to position the file cursor
-        // This can happen after pruning or default constructed positions
         LogError("Failed for %s while reading raw block storage header", pos.ToString());
         return util::Unexpected{ReadRawError::IO};
     }
-    AutoFile filein{OpenBlockFile({pos.nFile, pos.nPos - STORAGE_HEADER_BYTES}, /*fReadOnly=*/true)};
+
+    AutoFile filein{
+        OpenBlockFile(
+            {pos.nFile, pos.nPos - STORAGE_HEADER_BYTES},
+            /*fReadOnly=*/true
+        )
+    };
+
     if (filein.IsNull()) {
         LogError("OpenBlockFile failed for %s while reading raw block", pos.ToString());
         return util::Unexpected{ReadRawError::IO};
     }
 
     try {
-        MessageStartChars blk_start;
-        unsigned int blk_size;
+        MessageStartChars block_start;
+        uint32_t size_field{0};
+        filein >> block_start >> size_field;
 
-        filein >> blk_start >> blk_size;
-
-        if (blk_start != GetParams().MessageStart()) {
-            LogError("Block magic mismatch for %s: %s versus expected %s while reading raw block",
-                pos.ToString(), HexStr(blk_start), HexStr(GetParams().MessageStart()));
+        if (block_start != GetParams().MessageStart()) {
+            LogError(
+                "Block magic mismatch for %s: %s versus expected %s while reading raw block",
+                pos.ToString(),
+                HexStr(block_start),
+                HexStr(GetParams().MessageStart())
+            );
             return util::Unexpected{ReadRawError::IO};
         }
 
-        if (blk_size > MAX_SIZE) {
-            LogError("Block data is larger than maximum deserialization size for %s: %s versus %s while reading raw block",
-                pos.ToString(), blk_size, MAX_SIZE);
+        const bool compressed{IsCompressedBlockRecord(size_field)};
+        uint32_t stored_size{GetBlockRecordPayloadSize(size_field)};
+
+        if (stored_size == 0 || stored_size > MAX_SIZE) {
+            LogError(
+                "Stored block payload has invalid size for %s: %u",
+                pos.ToString(),
+                stored_size
+            );
             return util::Unexpected{ReadRawError::IO};
         }
+
+        if (!compressed) {
+            if (block_part) {
+                const auto [offset, size]{*block_part};
+                if (size == 0 || SaturatingAdd(offset, size) > stored_size) {
+                    return util::Unexpected{ReadRawError::BadPartRange};
+                }
+                filein.seek(offset, SEEK_CUR);
+                stored_size = size;
+            }
+
+            std::vector<std::byte> data(stored_size);
+            filein.read(data);
+            return data;
+        }
+
+        std::vector<std::byte> stored(stored_size);
+        filein.read(stored);
+        std::vector<std::byte> data{DecompressBlockPayload(stored)};
 
         if (block_part) {
             const auto [offset, size]{*block_part};
-            if (size == 0 || SaturatingAdd(offset, size) > blk_size) {
-                return util::Unexpected{ReadRawError::BadPartRange}; // Avoid logging - offset/size come from untrusted REST input
+            if (size == 0 || SaturatingAdd(offset, size) > data.size()) {
+                return util::Unexpected{ReadRawError::BadPartRange};
             }
-            filein.seek(offset, SEEK_CUR);
-            blk_size = size;
+
+            const auto begin{data.begin() + static_cast<std::ptrdiff_t>(offset)};
+            const auto end{begin + static_cast<std::ptrdiff_t>(size)};
+            return std::vector<std::byte>{begin, end};
         }
 
-        std::vector<std::byte> data(blk_size); // Zeroing of memory is intentional here
-        filein.read(data);
         return data;
     } catch (const std::exception& e) {
-        LogError("Read from block file failed: %s for %s while reading raw block", e.what(), pos.ToString());
+        LogError(
+            "Read from block file failed: %s for %s while reading raw block",
+            e.what(),
+            pos.ToString()
+        );
         return util::Unexpected{ReadRawError::IO};
     }
 }
 
 FlatFilePos BlockManager::WriteBlock(const CBlock& block, int nHeight)
 {
-    const unsigned int block_size{static_cast<unsigned int>(GetSerializeSize(TX_WITH_WITNESS(block)))};
-    FlatFilePos pos{FindNextBlockPos(block_size + STORAGE_HEADER_BYTES, nHeight, block.GetBlockTime())};
+    DataStream serialized;
+    serialized << TX_WITH_WITNESS(block);
+
+    const std::span<const std::byte> raw{
+        serialized.data(),
+        serialized.size()
+    };
+
+    std::vector<std::byte> compressed;
+    bool use_compressed{false};
+
+    try {
+        compressed = CompressBlockPayload(raw);
+        use_compressed =
+            compressed.size() <= BLOCK_STORAGE_SIZE_MASK &&
+            compressed.size() + BLOCK_STORAGE_MIN_SAVINGS < raw.size();
+    } catch (const std::exception& e) {
+        LogWarning(
+            "ZSTD block compression failed at height %d; storing raw block: %s\n",
+            nHeight,
+            e.what()
+        );
+    }
+
+    const std::span<const std::byte> payload{
+        use_compressed
+            ? std::span<const std::byte>{compressed.data(), compressed.size()}
+            : raw
+    };
+
+    if (payload.size() > BLOCK_STORAGE_SIZE_MASK) {
+        LogError("Block payload is too large for BitcoinRocks storage format");
+        return FlatFilePos();
+    }
+
+    const uint32_t stored_size{static_cast<uint32_t>(payload.size())};
+    const uint32_t size_field{
+        stored_size |
+        (use_compressed ? BLOCK_STORAGE_COMPRESSED_FLAG : uint32_t{0})
+    };
+
+    FlatFilePos pos{
+        FindNextBlockPos(
+            stored_size + STORAGE_HEADER_BYTES,
+            nHeight,
+            block.GetBlockTime()
+        )
+    };
+
     if (pos.IsNull()) {
         LogError("FindNextBlockPos failed for %s while writing block", pos.ToString());
         return FlatFilePos();
     }
+
     AutoFile file{OpenBlockFile(pos, /*fReadOnly=*/false)};
     if (file.IsNull()) {
         LogError("OpenBlockFile failed for %s while writing block", pos.ToString());
         m_opts.notifications.fatalError(_("Failed to write block."));
         return FlatFilePos();
     }
+
     {
         BufferedWriter fileout{file};
-
-        // Write index header
-        fileout << GetParams().MessageStart() << block_size;
+        fileout << GetParams().MessageStart() << size_field;
         pos.nPos += STORAGE_HEADER_BYTES;
-        // Write block
-        fileout << TX_WITH_WITNESS(block);
+        fileout.write(payload);
     }
 
     if (file.fclose() != 0) {
-        LogError("Failed to close block file %s: %s", pos.ToString(), SysErrorString(errno));
+        LogError(
+            "Failed to close block file %s: %s",
+            pos.ToString(),
+            SysErrorString(errno)
+        );
         m_opts.notifications.fatalError(_("Failed to close file when writing block."));
         return FlatFilePos();
     }
+
+    LogDebug(
+        BCLog::VALIDATION,
+        "BitcoinRocks block storage: height=%d raw=%u stored=%u codec=%s savings=%.2f%%\n",
+        nHeight,
+        raw.size(),
+        stored_size,
+        use_compressed ? "zstd" : "raw",
+        raw.empty()
+            ? 0.0
+            : 100.0 * static_cast<double>(raw.size() - stored_size) /
+                static_cast<double>(raw.size())
+    );
 
     return pos;
 }
@@ -1229,7 +1411,9 @@ BlockManager::BlockManager(const util::SignalInterrupt& interrupt, Options opts)
       m_undo_file_seq{FlatFileSeq{m_opts.blocks_dir, "rev", UNDOFILE_CHUNK_SIZE}},
       m_interrupt{interrupt}
 {
-    m_block_tree_db = std::make_unique<BlockTreeDB>(m_opts.block_tree_db_params);
+    DBParams block_tree_db_params{m_opts.block_tree_db_params};
+    block_tree_db_params.profile = DBProfile::BLOCK_INDEX;
+    m_block_tree_db = std::make_unique<BlockTreeDB>(block_tree_db_params);
 
     if (m_opts.block_tree_db_params.wipe_data) {
         m_block_tree_db->WriteReindexing(true);

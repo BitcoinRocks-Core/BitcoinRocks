@@ -137,7 +137,7 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, TestOpts opts)
             "-loglevel=trace",
             "-debug",
             "-debugexclude=libevent",
-            "-debugexclude=leveldb",
+            "-debugexclude=rocksdb",
         },
         opts.extra_args);
     if (G_TEST_COMMAND_LINE_ARGUMENTS) {

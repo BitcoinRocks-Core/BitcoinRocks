@@ -21,7 +21,7 @@ using util::Join;
  * for both bitcoind and bitcoin-qt, to make it harder for attackers to
  * target servers or GUI users specifically.
  */
-const std::string UA_NAME("Satoshi");
+const std::string UA_NAME("BitcoinRocks");
 
 
 #include <bitcoin-build-info.h>
@@ -85,16 +85,19 @@ std::string CopyrightHolders(const std::string& strPrefix)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/bitcoin/bitcoin>";
+    const std::string URL_BITCOINROCKS_SOURCE_CODE = "<https://github.com/BitcoinRocks-Core/BitcoinRocks>";
+    const std::string URL_BITCOIN_CORE_SOURCE_CODE = "<https://github.com/bitcoin/bitcoin>";
 
-    return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR).translated + " ") + "\n" +
+    return strprintf(_("Copyright (C) %i"), COPYRIGHT_YEAR).translated + " The BitcoinRocks developers\n" +
+           strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR).translated + " The Bitcoin Core developers\n" +
            "\n" +
            strprintf(_("Please contribute if you find %s useful. "
                        "Visit %s for further information about the software."),
                      CLIENT_NAME, "<" CLIENT_URL ">")
                .translated +
            "\n" +
-           strprintf(_("The source code is available from %s."), URL_SOURCE_CODE).translated +
+           strprintf(_("The BitcoinRocks source code is available from %s"), URL_BITCOINROCKS_SOURCE_CODE).translated + "\n" +
+           strprintf(_("The Bitcoin Core source code is available from %s."), URL_BITCOIN_CORE_SOURCE_CODE).translated +
            "\n" +
            "\n" +
            _("This is experimental software.") + "\n" +

@@ -1048,6 +1048,38 @@ UniValue MempoolInfoToJSON(const CTxMemPool& pool)
     ret.pushKV("fullrbf", true);
     ret.pushKV("permitbaremultisig", pool.m_opts.permit_bare_multisig);
     ret.pushKV("maxdatacarriersize", pool.m_opts.max_datacarrier_bytes.value_or(0));
+    ret.pushKV("policyprofile", pool.m_opts.policy_profile);
+    ret.pushKV(
+        "maxtapscriptsize",
+        pool.m_opts.max_tapscript_bytes
+            ? strprintf(
+                  "%u",
+                  *pool.m_opts.max_tapscript_bytes)
+            : "unlimited");
+    ret.pushKV("policylog", pool.m_opts.policy_log);
+    ret.pushKV(
+        "policylogdetails",
+        pool.m_opts.policy_log_details);
+
+    ret.pushKV(
+        "policyrejections",
+        static_cast<int64_t>(
+            pool.GetPolicyRejectionCount()));
+
+    UniValue policy_rejections_by_reason{
+        UniValue::VOBJ
+    };
+
+    for (const auto& [reason, count] :
+         pool.GetPolicyRejectionsByReason()) {
+        policy_rejections_by_reason.pushKV(
+            reason,
+            static_cast<int64_t>(count));
+    }
+
+    ret.pushKV(
+        "policyrejectionsbyreason",
+        std::move(policy_rejections_by_reason));
     ret.pushKV("limitclustercount", pool.m_opts.limits.cluster_count);
     ret.pushKV("limitclustersize", pool.m_opts.limits.cluster_size_vbytes);
     ret.pushKV("optimal", pool.m_txgraph->DoWork(0)); // 0 work is a quick check for known optimality
@@ -1075,6 +1107,14 @@ static RPCHelpMan getmempoolinfo()
                 {RPCResult::Type::BOOL, "fullrbf", "True if the mempool accepts RBF without replaceability signaling inspection (DEPRECATED)"},
                 {RPCResult::Type::BOOL, "permitbaremultisig", "True if the mempool accepts transactions with bare multisig outputs"},
                 {RPCResult::Type::NUM, "maxdatacarriersize", "Maximum number of bytes that can be used by OP_RETURN outputs in the mempool"},
+                {RPCResult::Type::STR, "policyprofile", "Active BitcoinRocks transaction relay policy profile"},
+                {RPCResult::Type::STR, "maxtapscriptsize", "Maximum accepted tapscript size in bytes, or unlimited"},
+                {RPCResult::Type::BOOL, "policylog", "Whether profile-specific transaction rejection logging is enabled"},
+                {RPCResult::Type::BOOL, "policylogdetails", "Whether detailed policy rejection logging is enabled"},
+                {RPCResult::Type::NUM, "policyrejections", "Number of transactions rejected by BitcoinRocks policy since startup"},
+                {RPCResult::Type::OBJ_DYN, "policyrejectionsbyreason", "Policy rejection counts grouped by reason", {
+                    {RPCResult::Type::NUM, "reason", "Number of rejections for this reason"},
+                }},
                 {RPCResult::Type::NUM, "limitclustercount", "Maximum number of transactions that can be in a cluster (configured by -limitclustercount)"},
                 {RPCResult::Type::NUM, "limitclustersize", "Maximum size of a cluster in virtual bytes (configured by -limitclustersize)"},
                 {RPCResult::Type::BOOL, "optimal", "If the mempool is in a known-optimal transaction ordering"},
