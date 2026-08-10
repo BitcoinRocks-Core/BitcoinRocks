@@ -172,13 +172,76 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_16.2.app
           clang --version
 
-      - name: Install Homebrew packages
+            - name: Install Homebrew packages
         env:
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
         run: |
           # A workaround for "The `brew link` step did not complete successfully" error.
           brew install --quiet python@3 || brew link --overwrite python@3
-          brew install --quiet coreutils ninja pkgconf ccache boost libevent zeromq qt@6 qrencode capnp
+          brew install --quiet coreutils ninja pkgconf ccache boost libevent zeromq qt@6 qrencode capnp lz4 zstd
+
+      - name: Install pinned RocksDB
+        run: |
+          set -euo pipefail
+
+          ROCKSDB_VERSION="10.10.1"
+          ROCKSDB_SHA256="df2ff348f3fac8578fd4b727eee7267aaf90cd403c99b55e898d1db63fa8cff5"
+
+          ROCKSDB_TARBALL="${RUNNER_TEMP}/rocksdb-${ROCKSDB_VERSION}.tar.gz"
+          ROCKSDB_SOURCE="${RUNNER_TEMP}/rocksdb-${ROCKSDB_VERSION}"
+          ROCKSDB_BUILD="${RUNNER_TEMP}/rocksdb-build"
+          ROCKSDB_PREFIX="${RUNNER_TEMP}/rocksdb-prefix"
+
+          curl --location --fail --retry 3 \
+            "https://github.com/facebook/rocksdb/archive/refs/tags/v${ROCKSDB_VERSION}.tar.gz" \
+            --output "${ROCKSDB_TARBALL}"
+
+          echo "${ROCKSDB_SHA256}  ${ROCKSDB_TARBALL}" | shasum -a 256 -c -
+
+          tar -xzf "${ROCKSDB_TARBALL}" -C "${RUNNER_TEMP}"
+
+          patch -d "${ROCKSDB_SOURCE}" -p1 \
+            < depends/patches/rocksdb/runtime_sse42_crc32c.patch
+
+          cmake \
+            -S "${ROCKSDB_SOURCE}" \
+            -B "${ROCKSDB_BUILD}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${ROCKSDB_PREFIX}" \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DROCKSDB_BUILD_SHARED=OFF \
+            -DWITH_LZ4=ON \
+            -DWITH_ZSTD=ON \
+            -DWITH_SNAPPY=OFF \
+            -DWITH_ZLIB=OFF \
+            -DWITH_BZ2=OFF \
+            -DWITH_XPRESS=OFF \
+            -DWITH_GFLAGS=OFF \
+            -DWITH_TESTS=OFF \
+            -DWITH_BENCHMARK_TOOLS=OFF \
+            -DWITH_TOOLS=OFF \
+            -DWITH_JEMALLOC=OFF \
+            -DWITH_LIBURING=OFF \
+            -DWITH_NUMA=OFF \
+            -DWITH_TBB=OFF \
+            -DUSE_RTTI=OFF \
+            -DPORTABLE=ON \
+            -DFAIL_ON_WARNINGS=OFF \
+            -Dlz4_ROOT_DIR="$(brew --prefix lz4)" \
+            -Dlz4_INCLUDE_DIRS="$(brew --prefix lz4)/include" \
+            -Dlz4_LIBRARIES="$(brew --prefix lz4)/lib/liblz4.a" \
+            -Dzstd_ROOT_DIR="$(brew --prefix zstd)" \
+            -Dzstd_INCLUDE_DIRS="$(brew --prefix zstd)/include" \
+            -Dzstd_LIBRARIES="$(brew --prefix zstd)/lib/libzstd.a"
+
+          cmake --build "${ROCKSDB_BUILD}" --parallel
+          cmake --install "${ROCKSDB_BUILD}"
+
+          echo "CMAKE_PREFIX_PATH=${ROCKSDB_PREFIX}:$(brew --prefix)" >> "${GITHUB_ENV}"
 
       - name: Set Ccache directory
         run: echo "CCACHE_DIR=${RUNNER_TEMP}/ccache_dir" >> "$GITHUB_ENV"
