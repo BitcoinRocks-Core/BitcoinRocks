@@ -889,7 +889,8 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
             std::nullopt,
         std::optional<uint64_t> limit =
             std::nullopt,
-        bool inscription_like = false) {
+        bool inscription_like = false)
+        EXCLUSIVE_LOCKS_REQUIRED(m_pool.cs) {
         const std::string rejection_reason_string{
             rejection_reason
         };
