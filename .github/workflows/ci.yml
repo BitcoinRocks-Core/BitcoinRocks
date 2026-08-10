@@ -172,7 +172,7 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_16.2.app
           clang --version
 
-            - name: Install Homebrew packages
+      - name: Install Homebrew packages
         env:
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
         run: |
