@@ -120,18 +120,18 @@ bool TxIndex::FindTx(const Txid& tx_hash, uint256& block_hash, CTransactionRef& 
     try {
         SpanReader{raw} >> header;
 
-        const size_t transaction_position{
+        const uint64_t transaction_position{
             GetSerializeSize(header) +
-            static_cast<size_t>(postx.nTxOffset)
+            static_cast<uint64_t>(postx.nTxOffset)
         };
 
-        if (transaction_position >= raw.size()) {
-            throw std::ios_base::failure{
-                "txindex offset exceeds decompressed block size"
-            };
+        if (transaction_position >= static_cast<uint64_t>(raw.size())) {
+           throw std::ios_base::failure{
+               "txindex offset exceeds decompressed block size"
+           };
         }
 
-        SpanReader{raw.subspan(transaction_position)} >>
+        SpanReader{raw.subspan(static_cast<size_t>(transaction_position))} >>
             TX_WITH_WITNESS(tx);
     } catch (const std::exception& e) {
         LogError("Deserialize or I/O error - %s", e.what());
