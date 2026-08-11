@@ -174,7 +174,7 @@ BCLog::LogFlags get_bclog_flag(btck_LogCategory category)
         return BCLog::LogFlags::COINDB;
     }
     case btck_LogCategory_LEVELDB: {
-        return BCLog::LogFlags::LEVELDB;
+        return BCLog::LogFlags::ROCKSDB;
     }
     case btck_LogCategory_MEMPOOL: {
         return BCLog::LogFlags::MEMPOOL;
