@@ -9,8 +9,9 @@ Check for shellcheck warnings in shell scripts.
 """
 
 import subprocess
-import re
 import sys
+
+from lint_ignore_dirs import SHARED_EXCLUDED_SUBTREES
 
 # Disabled warnings:
 DISABLED = [
@@ -67,10 +68,9 @@ def main():
         '*.sh',
     ]
     files = get_files(files_cmd)
-    reg = re.compile(r'src/(?:secp256k1|minisketch)')
 
     def should_exclude(fname: str) -> bool:
-        return bool(reg.match(fname))
+        return fname.startswith(tuple(SHARED_EXCLUDED_SUBTREES))
 
     # remove everything that doesn't match this regex
     files[:] = [file for file in files if not should_exclude(file)]
