@@ -5,7 +5,17 @@
   "dependencies": [
     "boost-multi-index",
     "boost-signals2",
-    "libevent"
+    "libevent",
+    "lz4",
+    "zstd",
+    {
+      "name": "rocksdb",
+      "default-features": false,
+      "features": [
+        "lz4",
+        "zstd"
+      ]
+    }
   ],
   "default-features": [
     "qt",
@@ -56,6 +66,11 @@
       "$comment": "Newer unreleased libevent versions cause https://github.com/bitcoin/bitcoin/issues/30096",
       "name": "libevent",
       "version": "2.1.12#7"
+    },
+    {
+      "$comment": "BitcoinRocks requires RocksDB 10.10.1 exactly",
+      "name": "rocksdb",
+      "version": "10.10.1"
     }
   ]
 }

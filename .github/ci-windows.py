@@ -101,21 +101,21 @@ def check_manifests(ci_type):
         return
 
     release_dir = Path.cwd() / "build" / "bin" / "Release"
-    manifest_path = release_dir / "bitcoind.manifest"
+    manifest_path = release_dir / "bitcoinrocksd.manifest"
     cmd_bitcoind_manifest = [
         "mt.exe",
         "-nologo",
-        f"-inputresource:{release_dir / 'bitcoind.exe'}",
+        f"-inputresource:{release_dir / 'bitcoinrocksd.exe'}",
         f"-out:{manifest_path}",
     ]
     run(cmd_bitcoind_manifest)
     print(manifest_path.read_text())
 
     skips = {  # Skip as they currently do not have manifests
-        "fuzz.exe",
-        "bench_bitcoin.exe",
-        "test_bitcoin-qt.exe",
-        "bitcoin-chainstate.exe",
+        "bitcoinrocks-fuzz.exe",
+        "bench_bitcoinrocks.exe",
+        "test_bitcoinrocks-qt.exe",
+        "bitcoinrocks-chainstate.exe",
     }
     for entry in release_dir.iterdir():
         if entry.suffix.lower() != ".exe":
@@ -162,14 +162,14 @@ def run_tests(ci_type):
     if ci_type == "standard":
         os.environ["DIR_UNIT_TEST_DATA"] = str(workspace / "unit_test_data")
         test_envs = {
-            "BITCOIN_BIN": "bitcoin.exe",
-            "BITCOIND": "bitcoind.exe",
-            "BITCOINCLI": "bitcoin-cli.exe",
-            "BITCOIN_BENCH": "bench_bitcoin.exe",
-            "BITCOINTX": "bitcoin-tx.exe",
-            "BITCOINUTIL": "bitcoin-util.exe",
-            "BITCOINWALLET": "bitcoin-wallet.exe",
-            "BITCOINCHAINSTATE": "bitcoin-chainstate.exe",
+            "BITCOIN_BIN": "bitcoinrocks.exe",
+            "BITCOIND": "bitcoinrocksd.exe",
+            "BITCOINCLI": "bitcoinrocks-cli.exe",
+            "BITCOIN_BENCH": "bench_bitcoinrocks.exe",
+            "BITCOINTX": "bitcoinrocks-tx.exe",
+            "BITCOINUTIL": "bitcoinrocks-util.exe",
+            "BITCOINWALLET": "bitcoinrocks-wallet.exe",
+            "BITCOINCHAINSTATE": "bitcoinrocks-chainstate.exe",
         }
         for var, exe in test_envs.items():
             os.environ[var] = str(release_bin / exe)
@@ -200,7 +200,7 @@ def run_tests(ci_type):
         run(test_cmd)
 
     elif ci_type == "fuzz":
-        os.environ["BITCOINFUZZ"] = str(release_bin / "fuzz.exe")
+        os.environ["BITCOINFUZZ"] = str(release_bin / "bitcoinrocks-fuzz.exe")
         fuzz_cmd = [
             sys.executable,
             str(build_dir / "test" / "fuzz" / "test_runner.py"),
