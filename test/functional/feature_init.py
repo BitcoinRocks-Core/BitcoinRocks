@@ -121,12 +121,12 @@ class InitTest(BitcoinTestFramework):
 
         deletion_rounds = [
             {
-                'filepath_glob': 'blocks/index/*.ldb',
+                'filepath_glob': 'blocks/index/*.sst',
                 'error_message': 'Error opening block database.',
                 'startup_args': [],
             },
             {
-                'filepath_glob': 'chainstate/*.ldb',
+                'filepath_glob': 'chainstate/*.sst',
                 'error_message': 'Error opening coins database.',
                 'startup_args': ['-checklevel=4'],
             },
@@ -137,12 +137,12 @@ class InitTest(BitcoinTestFramework):
             },
             {
                 'filepath_glob': 'indexes/txindex/MANIFEST*',
-                'error_message': 'Fatal RocksDB error: Corruption: CURRENT points to a non-existent file',
+                'error_message': r'Fatal RocksDB error: .*MANIFEST',
                 'startup_args': ['-txindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txospenderindex/db/MANIFEST*',
-                'error_message': 'Fatal RocksDB error: Corruption: CURRENT points to a non-existent file',
+                'error_message': r'Fatal RocksDB error: .*MANIFEST',
                 'startup_args': ['-txospenderindex=1'],
             },
             # Removing these files does not result in a startup error:
@@ -152,12 +152,12 @@ class InitTest(BitcoinTestFramework):
 
         perturbation_rounds = [
             {
-                'filepath_glob': 'blocks/index/*.ldb',
-                'error_message': 'Error loading block database.',
+                'filepath_glob': 'blocks/index/*.sst',
+                'error_message': 'Error opening block database.',
                 'startup_args': [],
             },
             {
-                'filepath_glob': 'chainstate/*.ldb',
+                'filepath_glob': 'chainstate/*.sst',
                 'error_message': 'Error opening coins database.',
                 'startup_args': [],
             },

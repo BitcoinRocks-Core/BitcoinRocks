@@ -341,6 +341,9 @@ BOOST_AUTO_TEST_CASE(streams_buffered_file)
     try {
         BufferedFile bfbad{file, 25, 25};
         BOOST_CHECK(false);
+    } catch (const std::ios_base::failure& e) {
+        BOOST_CHECK(strstr(e.what(),
+                        "Rewind limit must be less than buffer size") != nullptr);
     } catch (const std::exception& e) {
         BOOST_CHECK(strstr(e.what(),
                         "Rewind limit must be less than buffer size") != nullptr);
@@ -377,6 +380,9 @@ BOOST_AUTO_TEST_CASE(streams_buffered_file)
     try {
         bf >> i;
         BOOST_CHECK(false);
+    } catch (const std::ios_base::failure& e) {
+        BOOST_CHECK(strstr(e.what(),
+                           "Attempt to position past buffer limit") != nullptr);
     } catch (const std::exception& e) {
         BOOST_CHECK(strstr(e.what(),
                            "Attempt to position past buffer limit") != nullptr);
@@ -430,6 +436,9 @@ BOOST_AUTO_TEST_CASE(streams_buffered_file)
     try {
         bf >> i;
         BOOST_CHECK(false);
+    } catch (const std::ios_base::failure& e) {
+        BOOST_CHECK(strstr(e.what(),
+                        "BufferedFile::Fill: end of file") != nullptr);
     } catch (const std::exception& e) {
         BOOST_CHECK(strstr(e.what(),
                         "BufferedFile::Fill: end of file") != nullptr);
@@ -492,6 +501,8 @@ BOOST_AUTO_TEST_CASE(streams_buffered_file_skip)
     try {
         bf.SkipTo(14);
         BOOST_CHECK(false);
+    } catch (const std::ios_base::failure& e) {
+        BOOST_CHECK(strstr(e.what(), "Attempt to position past buffer limit") != nullptr);
     } catch (const std::exception& e) {
         BOOST_CHECK(strstr(e.what(), "Attempt to position past buffer limit") != nullptr);
     }

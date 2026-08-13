@@ -65,8 +65,8 @@ c. Announce 1 header that forks off the last two blocks.
    Expect: no response.
 d. Announce 1 more header that builds on that fork.
    Expect: one getdata request for two blocks.
-e. Announce 16 more headers that build on that fork.
-   Expect: getdata request for 14 more blocks.
+e. Announce 32 more headers that build on that fork.
+   Expect: getdata request for 30 more blocks.
 f. Announce 1 more header that builds on that fork.
    Expect: no response.
 
@@ -476,7 +476,7 @@ class SendHeadersTest(BitcoinTestFramework):
         blocks = []
 
         # Create extra blocks for later
-        for _ in range(20):
+        for _ in range(35):
             blocks.append(create_block(tip, create_coinbase(height), block_time))
             blocks[-1].solve()
             tip = blocks[-1].hash_int
@@ -497,15 +497,15 @@ class SendHeadersTest(BitcoinTestFramework):
         test_node.sync_with_ping()
         test_node.wait_for_getdata([x.hash_int for x in blocks[0:2]], timeout=DIRECT_FETCH_RESPONSE_TIME)
 
-        # Announcing 16 more headers should trigger direct fetch for 14 more
-        # blocks
-        test_node.send_header_for_blocks(blocks[2:18])
+        # Announcing 32 more headers should trigger direct fetch for 30 more
+        # blocks, filling BitcoinRocks' 32-block in-flight capacity.
+        test_node.send_header_for_blocks(blocks[2:34])
         test_node.sync_with_ping()
-        test_node.wait_for_getdata([x.hash_int for x in blocks[2:16]], timeout=DIRECT_FETCH_RESPONSE_TIME)
+        test_node.wait_for_getdata([x.hash_int for x in blocks[2:32]], timeout=DIRECT_FETCH_RESPONSE_TIME)
 
         # Announcing 1 more header should not trigger any response
         test_node.last_message.pop("getdata", None)
-        test_node.send_header_for_blocks(blocks[18:19])
+        test_node.send_header_for_blocks(blocks[34:35])
         test_node.sync_with_ping()
         with p2p_lock:
             assert "getdata" not in test_node.last_message

@@ -6,6 +6,7 @@
 - Start a node, generate blocks, then restart with -reindex after setting blk files to read-only
 """
 
+import hashlib
 import os
 import stat
 import subprocess
@@ -22,7 +23,15 @@ class BlockstoreReindexTest(BitcoinTestFramework):
         self.log.debug("Generate block big enough to start second block file")
         fastprune_blockfile_size = 0x10000
         opreturn = "6a"
-        nulldata = fastprune_blockfile_size * "ff"
+
+        # The upstream fixture uses repeated 0xff bytes, which compress extremely
+        # well in BitcoinRocks and therefore never fill the physical block file.
+        # Use deterministic incompressible bytes of exactly the same size so the
+        # test continues to exercise fastprune block-file rollover.
+        nulldata = hashlib.shake_256(
+            b"feature-reindex-readonly"
+        ).digest(fastprune_blockfile_size).hex()
+
         self.generateblock(self.nodes[0], output=f"raw({opreturn}{nulldata})", transactions=[])
         block_count = self.nodes[0].getblockcount()
         self.stop_node(0)

@@ -5,7 +5,7 @@
 
 #include <dbwrapper.h>
 
-#include <common/system.h>
+
 #include <logging.h>
 #include <random.h>
 #include <serialize.h>
@@ -27,12 +27,20 @@
 #include <rocksdb/table.h>
 #include <rocksdb/write_batch.h>
 
+#ifdef WIN32
+#include <compat/compat.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <thread>
 #include <utility>
 
 static auto CharCast(const std::byte* data)
@@ -99,6 +107,48 @@ struct RocksDBTuning {
     uint32_t subcompactions{1};
 };
 
+static int GetRocksDBCores()
+{
+    return std::thread::hardware_concurrency();
+}
+
+static std::optional<size_t> GetRocksDBTotalRAM()
+{
+    [[maybe_unused]] auto clamp{
+        [](uint64_t v) {
+            return size_t{
+                std::min(
+                    v,
+                    uint64_t{
+                        std::numeric_limits<size_t>::max()
+                    }
+                )
+            };
+        }
+    };
+
+#ifdef WIN32
+    if (MEMORYSTATUSEX m{};
+        (m.dwLength = sizeof(m),
+         GlobalMemoryStatusEx(&m))) {
+        return clamp(m.ullTotalPhys);
+    }
+#elif defined(__APPLE__) || \
+      defined(__FreeBSD__) || \
+      defined(__NetBSD__) || \
+      defined(__OpenBSD__) || \
+      defined(__illumos__) || \
+      defined(__linux__)
+    if (long p{sysconf(_SC_PHYS_PAGES)},
+             s{sysconf(_SC_PAGESIZE)};
+        p > 0 && s > 0) {
+        return clamp(1ULL * p * s);
+    }
+#endif
+
+    return std::nullopt;
+}
+
 static bool IsHighEndRocksDBHardware(int cores)
 {
     constexpr uint64_t HIGH_END_MEMORY_BYTES{
@@ -106,7 +156,7 @@ static bool IsHighEndRocksDBHardware(int cores)
     };
 
     const std::optional<uint64_t> physical_memory{
-        GetTotalRAM()
+        GetRocksDBTotalRAM()
     };
 
     return
@@ -114,6 +164,7 @@ static bool IsHighEndRocksDBHardware(int cores)
         physical_memory &&
         *physical_memory >= HIGH_END_MEMORY_BYTES;
 }
+
 
 static bool HasHighEndRocksDBBudget(
     DBProfile profile,
@@ -161,7 +212,7 @@ static RocksDBTuning GetTuning(
     const int cores{
         std::max(
             1,
-            GetNumCores()
+            GetRocksDBCores()
         )
     };
 
@@ -381,6 +432,9 @@ static rocksdb::Options GetOptions(const RocksDBTuning& tuning)
 
     options.paranoid_checks =
         true;
+
+    options.wal_recovery_mode =
+        rocksdb::WALRecoveryMode::kTolerateCorruptedTailRecords;
 
     options.compression =
         rocksdb::kLZ4Compression;

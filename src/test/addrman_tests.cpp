@@ -1099,6 +1099,8 @@ BOOST_AUTO_TEST_CASE(load_addrman_corrupted)
         unsigned char pchMsgTmp[4];
         ssPeers1 >> pchMsgTmp;
         ssPeers1 >> addrman1;
+    } catch (const std::ios_base::failure&) {
+        exceptionThrown = true;
     } catch (const std::exception&) {
         exceptionThrown = true;
     }

@@ -41,22 +41,41 @@ BOOST_AUTO_TEST_CASE(blockmanager_find_block_pos)
         },
     };
     BlockManager blockman{*Assert(m_node.shutdown_signal), blockman_opts};
-    // simulate adding a genesis block normally
-    BOOST_CHECK_EQUAL(blockman.WriteBlock(params->GenesisBlock(), 0).nPos, STORAGE_HEADER_BYTES);
-    // simulate what happens during reindex
-    // simulate a well-formed genesis block being found at offset 8 in the blk00000.dat file
-    // the block is found at offset 8 because there is an 8 byte serialization header
-    // consisting of 4 magic bytes + 4 length bytes before each block in a well-formed blk file.
+    // Simulate adding a genesis block normally.
+    const FlatFilePos first_pos{
+    blockman.WriteBlock(params->GenesisBlock(), 0)
+    };
+    BOOST_CHECK_EQUAL(first_pos.nPos, STORAGE_HEADER_BYTES);
+
+    // BitcoinRocks block records may be compressed, so obtain the actual
+    // number of payload bytes physically stored in blk00000.dat.
+    const uint32_t genesis_stored_size{
+    blockman.GetBlockFileInfo(0)->nSize - first_pos.nPos
+    };
+
+    // Simulate what happens during reindex. The block payload begins after
+    // the 8-byte storage header consisting of magic + encoded size.
     const FlatFilePos pos{0, STORAGE_HEADER_BYTES};
-    blockman.UpdateBlockInfo(params->GenesisBlock(), 0, pos);
-    // now simulate what happens after reindex for the first new block processed
-    // the actual block contents don't matter, just that it's a block.
-    // verify that the write position is at offset 0x12d.
-    // this is a check to make sure that https://github.com/bitcoin/bitcoin/issues/21379 does not recur
-    // 8 bytes (for serialization header) + 285 (for serialized genesis block) = 293
-    // add another 8 bytes for the second block's serialization header and we get 293 + 8 = 301
-    FlatFilePos actual{blockman.WriteBlock(params->GenesisBlock(), 1)};
-    BOOST_CHECK_EQUAL(actual.nPos, STORAGE_HEADER_BYTES + ::GetSerializeSize(TX_WITH_WITNESS(params->GenesisBlock())) + STORAGE_HEADER_BYTES);
+    blockman.UpdateBlockInfo(
+        params->GenesisBlock(),
+        0,
+        pos,
+        genesis_stored_size
+    );
+
+    // Now simulate the first new block written after reindex. Its payload
+    // must begin after the physical stored payload of the reindexed block,
+    // not after its decompressed serialized size.
+    FlatFilePos actual{
+        blockman.WriteBlock(params->GenesisBlock(), 1)
+    };
+
+    BOOST_CHECK_EQUAL(
+        actual.nPos,
+        STORAGE_HEADER_BYTES +
+            genesis_stored_size +
+            STORAGE_HEADER_BYTES
+    );
 }
 
 BOOST_FIXTURE_TEST_CASE(blockmanager_scan_unlink_already_pruned_files, TestChain100Setup)
@@ -254,7 +273,7 @@ BOOST_AUTO_TEST_CASE(blockmanager_flush_block_file)
     block3.nVersion = 3;
 
     // They are 80 bytes header + 1 byte 0x00 for vtx length
-    constexpr int TEST_BLOCK_SIZE{81};
+    constexpr uint32_t TEST_BLOCK_SIZE{81};
 
     // Blockstore is empty
     BOOST_CHECK_EQUAL(blockman.CalculateCurrentUsage(), 0);
@@ -289,7 +308,12 @@ BOOST_AUTO_TEST_CASE(blockmanager_flush_block_file)
     // to block 2 location.
     CBlockFileInfo* block_data = blockman.GetBlockFileInfo(0);
     BOOST_CHECK_EQUAL(block_data->nBlocks, 2);
-    blockman.UpdateBlockInfo(block3, /*nHeight=*/3, /*pos=*/pos2);
+    blockman.UpdateBlockInfo(
+        block3,
+        /*nHeight=*/3,
+        /*pos=*/pos2,
+        /*stored_size=*/TEST_BLOCK_SIZE
+    );
     // Metadata is updated...
     BOOST_CHECK_EQUAL(block_data->nBlocks, 3);
     // ...but there are still only two blocks in the file

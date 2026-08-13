@@ -178,6 +178,8 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
         try {
             ssData >> TX_WITH_WITNESS(tx_extended);
             if (ssData.empty()) ok_extended = true;
+        } catch (const std::ios_base::failure&) {
+            // Fall through.
         } catch (const std::exception&) {
             // Fall through.
         }
@@ -196,6 +198,8 @@ static bool DecodeTx(CMutableTransaction& tx, const std::vector<unsigned char>& 
         try {
             ssData >> TX_NO_WITNESS(tx_legacy);
             if (ssData.empty()) ok_legacy = true;
+        } catch (const std::ios_base::failure&) {
+            // Fall through.
         } catch (const std::exception&) {
             // Fall through.
         }

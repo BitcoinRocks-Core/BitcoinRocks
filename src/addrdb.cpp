@@ -218,6 +218,9 @@ util::Result<std::unique_ptr<AddrMan>> LoadAddrman(const NetGroupManager& netgro
         addrman = std::make_unique<AddrMan>(netgroupman, deterministic, /*consistency_check_ratio=*/check_addrman);
         LogWarning("Creating new peers.dat because the file version was not compatible (%s). Original backed up to peers.dat.bak", fs::quoted(fs::PathToString(path_addr)));
         DumpPeerAddresses(args, *addrman);
+    } catch (const std::ios_base::failure& e) {
+        return util::Error{strprintf(_("Invalid or corrupt peers.dat (%s). If you believe this is a bug, please report it to %s. As a workaround, you can move the file (%s) out of the way (rename, move, or delete) to have a new one created on the next start."),
+                                     e.what(), CLIENT_BUGREPORT, fs::quoted(fs::PathToString(path_addr)))};
     } catch (const std::exception& e) {
         return util::Error{strprintf(_("Invalid or corrupt peers.dat (%s). If you believe this is a bug, please report it to %s. As a workaround, you can move the file (%s) out of the way (rename, move, or delete) to have a new one created on the next start."),
                                      e.what(), CLIENT_BUGREPORT, fs::quoted(fs::PathToString(path_addr)))};
@@ -237,6 +240,8 @@ std::vector<CAddress> ReadAnchors(const fs::path& anchors_db_path)
     try {
         DeserializeFileDB(anchors_db_path, CAddress::V2_DISK(anchors));
         LogInfo("Loaded %i addresses from %s", anchors.size(), fs::quoted(fs::PathToString(anchors_db_path.filename())));
+    } catch (const std::ios_base::failure&) {
+        anchors.clear();
     } catch (const std::exception&) {
         anchors.clear();
     }

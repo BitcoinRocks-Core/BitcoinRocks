@@ -167,6 +167,8 @@ public:
         try {
             DataStream ssKey{GetKeyImpl()};
             ssKey >> key;
+        } catch (const std::ios_base::failure&) {
+            return false;
         } catch (const std::exception&) {
             return false;
         }

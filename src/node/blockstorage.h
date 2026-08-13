@@ -419,9 +419,14 @@ public:
      *
      * @param[in]  block        the block being processed
      * @param[in]  nHeight      the height of the block
-     * @param[in]  pos          the position of the serialized CBlock on disk
+     * @param[in]  pos          the position of the stored block payload on disk
+     * @param[in]  stored_size  the number of payload bytes physically stored on disk
      */
-    void UpdateBlockInfo(const CBlock& block, unsigned int nHeight, const FlatFilePos& pos);
+    void UpdateBlockInfo(
+       const CBlock& block,
+       unsigned int nHeight,
+       const FlatFilePos& pos,
+       uint32_t stored_size);
 
     /** Whether running in -prune mode. */
     [[nodiscard]] bool IsPruneMode() const { return m_prune_mode; }

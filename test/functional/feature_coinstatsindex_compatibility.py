@@ -9,7 +9,7 @@ This test may be removed some time after v29 has reached end of life.
 
 import shutil
 
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import assert_equal
 
 
@@ -21,6 +21,11 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_previous_releases()
+        raise SkipTest(
+            "Not applicable to BitcoinRocks: RocksDB and the BitcoinRocks "
+            "on-disk block/index storage format are intentionally incompatible "
+            "with historical Bitcoin Core coinstatsindex database files."
+        )
 
     def setup_nodes(self):
         self.add_nodes(

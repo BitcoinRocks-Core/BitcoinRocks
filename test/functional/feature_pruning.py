@@ -8,6 +8,7 @@ WARNING:
 This test uses 4GB of disk space.
 This test takes 30 mins or more (up to 2 hours)
 """
+import hashlib
 import os
 
 from test_framework.blocktools import (
@@ -17,7 +18,6 @@ from test_framework.blocktools import (
 )
 from test_framework.script import (
     CScript,
-    OP_NOP,
     OP_RETURN,
 )
 from test_framework.test_framework import BitcoinTestFramework
@@ -34,9 +34,12 @@ from test_framework.util import (
 TIMESTAMP_WINDOW = 2 * 60 * 60
 
 def mine_large_blocks(node, n):
-    # Make a large scriptPubKey for the coinbase transaction. This is OP_RETURN
-    # followed by 950k of OP_NOP. This would be non-standard in a non-coinbase
-    # transaction but is consensus valid.
+    # Make a large scriptPubKey for the coinbase transaction. The upstream
+    # fixture uses 950k repeated OP_NOP bytes, which compress extremely well in
+    # BitcoinRocks and therefore do not exercise physical disk pruning.
+    # Use deterministic incompressible bytes while preserving the same script
+    # size. This remains non-standard in a non-coinbase transaction but is
+    # consensus valid.
 
     # Set the nTime if this is the first time this function has been called.
     # A static variable ensures that time is monotonicly increasing and is therefore
@@ -45,7 +48,10 @@ def mine_large_blocks(node, n):
         mine_large_blocks.nTime = 0
 
     # Get the block parameters for the first block
-    big_script = CScript([OP_RETURN] + [OP_NOP] * 950000)
+    big_script = CScript(
+        bytes([OP_RETURN])
+        + hashlib.shake_256(b"feature-pruning-large-block").digest(950000)
+    )
     best_block = node.getblock(node.getbestblockhash())
     height = int(best_block["height"]) + 1
     mine_large_blocks.nTime = max(mine_large_blocks.nTime, int(best_block["time"])) + 1

@@ -4550,7 +4550,15 @@ void ChainstateManager::ReportHeadersPresync(int64_t height, int64_t timestamp)
 }
 
 /** Store block on disk. If dbp is non-nullptr, the file is known to already reside on disk */
-bool ChainstateManager::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, BlockValidationState& state, CBlockIndex** ppindex, bool fRequested, const FlatFilePos* dbp, bool* fNewBlock, bool min_pow_checked)
+bool ChainstateManager::AcceptBlock(
+    const std::shared_ptr<const CBlock>& pblock,
+    BlockValidationState& state,
+    CBlockIndex** ppindex,
+    bool fRequested,
+    const FlatFilePos* dbp,
+    bool* fNewBlock,
+    bool min_pow_checked,
+    std::optional<uint32_t> dbp_stored_size)
 {
     const CBlock& block = *pblock;
 
@@ -4622,17 +4630,26 @@ bool ChainstateManager::AcceptBlock(const std::shared_ptr<const CBlock>& pblock,
     try {
         FlatFilePos blockPos{};
         if (dbp) {
+            assert(dbp_stored_size.has_value());
+
             blockPos = *dbp;
-            m_blockman.UpdateBlockInfo(block, pindex->nHeight, blockPos);
+            m_blockman.UpdateBlockInfo(
+                block,
+                pindex->nHeight,
+                blockPos,
+                *dbp_stored_size
+            );
         } else {
+            assert(!dbp_stored_size.has_value());
+
             blockPos = m_blockman.WriteBlock(block, pindex->nHeight);
             if (blockPos.IsNull()) {
                 state.Error(strprintf("%s: Failed to find position to write new block to disk", __func__));
                 return false;
             }
-        }
-        ReceivedBlockTransactions(block, pindex, blockPos);
-    } catch (const std::runtime_error& e) {
+         }
+         ReceivedBlockTransactions(block, pindex, blockPos);
+     } catch (const std::runtime_error& e) {
         return FatalError(GetNotifications(), state, strprintf(_("System error while saving block to disk: %s"), e.what()));
     }
 
@@ -5211,8 +5228,8 @@ bool Chainstate::LoadGenesisBlock()
 void ChainstateManager::LoadExternalBlockFile(
     AutoFile& file_in,
     FlatFilePos* dbp,
-    std::multimap<uint256, FlatFilePos>* blocks_with_unknown_parent)
-{
+    std::multimap<uint256, std::pair<FlatFilePos, uint32_t>>*
+        blocks_with_unknown_parent) {
     assert(!dbp == !blocks_with_unknown_parent);
 
     const auto start{SteadyClock::now()};
@@ -5260,6 +5277,8 @@ void ChainstateManager::LoadExternalBlockFile(
                 ) {
                     continue;
                 }
+            } catch (const std::ios_base::failure&) {
+                break;
             } catch (const std::exception&) {
                 break;
             }
@@ -5313,7 +5332,10 @@ void ChainstateManager::LoadExternalBlockFile(
                         );
 
                         if (dbp && blocks_with_unknown_parent) {
-                            blocks_with_unknown_parent->emplace(header.hashPrevBlock, *dbp);
+                            blocks_with_unknown_parent->emplace(
+                               header.hashPrevBlock,
+                               std::make_pair(*dbp, stored_size)
+                            );
                         }
                         continue;
                     }
@@ -5331,7 +5353,7 @@ void ChainstateManager::LoadExternalBlockFile(
                         }
 
                         BlockValidationState state;
-                        if (AcceptBlock(pblock, state, nullptr, true, dbp, nullptr, true)) {
+                        if (AcceptBlock(pblock, state, nullptr, true, dbp, nullptr, true, dbp ? std::optional<uint32_t>{stored_size} : std::nullopt)) {
                             nLoaded++;
                         }
                         if (state.IsError()) {
@@ -5386,42 +5408,46 @@ void ChainstateManager::LoadExternalBlockFile(
                     auto range{blocks_with_unknown_parent->equal_range(head)};
 
                     while (range.first != range.second) {
-                        auto it = range.first;
-                        auto pblockrecursive = std::make_shared<CBlock>();
+                       auto it = range.first;
+                       auto pblockrecursive = std::make_shared<CBlock>();
 
-                        if (m_blockman.ReadBlock(*pblockrecursive, it->second, {})) {
-                            const auto& block_hash{pblockrecursive->GetHash()};
-                            LogDebug(
-                                BCLog::REINDEX,
-                                "%s: Processing out of order child %s of %s",
-                                __func__,
-                                block_hash.ToString(),
-                                head.ToString()
-                            );
+                       const FlatFilePos child_pos{it->second.first};
+                       const uint32_t child_stored_size{it->second.second};
 
-                            LOCK(cs_main);
-                            BlockValidationState dummy;
-                            if (
-                                AcceptBlock(
-                                    pblockrecursive,
-                                    dummy,
-                                    nullptr,
-                                    true,
-                                    &it->second,
-                                    nullptr,
-                                    true
-                                )
-                            ) {
-                                nLoaded++;
-                                queue.push_back(block_hash);
-                            }
-                        }
+                       if (m_blockman.ReadBlock(*pblockrecursive, child_pos, {})) {
+                           const auto& block_hash{pblockrecursive->GetHash()};
+                           LogDebug(
+                               BCLog::REINDEX,
+                               "%s: Processing out of order child %s of %s",
+                               __func__,
+                               block_hash.ToString(),
+                               head.ToString()
+                       );
 
-                        range.first++;
-                        blocks_with_unknown_parent->erase(it);
-                        NotifyHeaderTip();
+                       LOCK(cs_main);
+                       BlockValidationState dummy;
+                       if (
+                           AcceptBlock(
+                           pblockrecursive,
+                           dummy,
+                           nullptr,
+                           true,
+                           &child_pos,
+                           nullptr,
+                           true,
+                           child_stored_size
+                           )
+                       ) {
+                           nLoaded++;
+                           queue.push_back(block_hash);
+                       }
                     }
-                }
+
+                    range.first++;
+                    blocks_with_unknown_parent->erase(it);
+                    NotifyHeaderTip();
+                 }
+              }
             } catch (const std::exception& e) {
                 LogDebug(
                     BCLog::REINDEX,

@@ -4,6 +4,12 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test support for XORed block data and undo files (`-blocksxor` option)."""
 
+import hashlib
+
+from test_framework.script import (
+    CScript,
+    OP_RETURN,
+)
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.test_node import (
     ErrorMatch,
@@ -29,8 +35,26 @@ class BlocksXORTest(BitcoinTestFramework):
         self.log.info("Mine some blocks, to create multiple blk*.dat/rev*.dat files")
         node = self.nodes[0]
         wallet = MiniWallet(node)
-        for _ in range(5):
-            wallet.send_self_transfer(from_node=node, target_vsize=20000)
+        for block_num in range(5):
+            tx = wallet.create_self_transfer(target_vsize=20000)
+
+            # MiniWallet pads target_vsize transactions with a highly repetitive
+            # OP_RETURN script. BitcoinRocks compresses block records, so that
+            # fixture no longer consumes enough physical blk*.dat space to test
+            # fastprune file rollover. Replace only the padding bytes with
+            # deterministic incompressible data while preserving its exact size.
+            padding_script = tx["tx"].vout[-1].scriptPubKey
+            data_len = len(padding_script) - 4
+            tx["tx"].vout[-1].scriptPubKey = CScript([
+                OP_RETURN,
+                hashlib.shake_256(
+                    f"blocksxor-{block_num}".encode()
+                ).digest(data_len),
+            ])
+            wallet.sendrawtransaction(
+                from_node=node,
+                tx_hex=tx["tx"].serialize().hex(),
+            )
             self.generate(wallet, 1)
 
         block_files = list(node.blocks_path.glob('blk[0-9][0-9][0-9][0-9][0-9].dat'))

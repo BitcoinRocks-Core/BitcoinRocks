@@ -1003,7 +1003,11 @@ FlatFilePos BlockManager::FindNextBlockPos(unsigned int nAddSize, unsigned int n
     return pos;
 }
 
-void BlockManager::UpdateBlockInfo(const CBlock& block, unsigned int nHeight, const FlatFilePos& pos)
+void BlockManager::UpdateBlockInfo(
+    const CBlock& block,
+    unsigned int nHeight,
+    const FlatFilePos& pos,
+    uint32_t stored_size)
 {
     LOCK(cs_LastBlockFile);
 
@@ -1014,14 +1018,16 @@ void BlockManager::UpdateBlockInfo(const CBlock& block, unsigned int nHeight, co
         m_blockfile_cursors[chain_type] = BlockfileCursor{pos.nFile};
     }
 
-    // Update the file information with the current block.
-    const unsigned int added_size = ::GetSerializeSize(TX_WITH_WITNESS(block));
+    // Update file information using the number of bytes physically stored
+    // in the block file. For compressed BitcoinRocks block records this is
+    // intentionally different from the serialized CBlock size.
     const int nFile = pos.nFile;
     if (static_cast<int>(m_blockfile_info.size()) <= nFile) {
         m_blockfile_info.resize(nFile + 1);
     }
     m_blockfile_info[nFile].AddBlock(nHeight, block.GetBlockTime());
-    m_blockfile_info[nFile].nSize = std::max(pos.nPos + added_size, m_blockfile_info[nFile].nSize);
+    m_blockfile_info[nFile].nSize =
+        std::max(pos.nPos + stored_size, m_blockfile_info[nFile].nSize);
     m_dirty_fileinfo.insert(nFile);
 }
 
@@ -1455,7 +1461,8 @@ void ImportBlocks(ChainstateManager& chainman, std::span<const fs::path> import_
 
         // Map of disk positions for blocks with unknown parent (only used for reindex);
         // parent hash -> child disk position, multiple children can have the same parent.
-        std::multimap<uint256, FlatFilePos> blocks_with_unknown_parent;
+        std::multimap<uint256, std::pair<FlatFilePos, uint32_t>>
+            blocks_with_unknown_parent;
 
         for (int nFile{0}; nFile < total_files; ++nFile) {
             FlatFilePos pos(nFile, 0);

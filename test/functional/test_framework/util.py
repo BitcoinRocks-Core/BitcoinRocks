@@ -304,7 +304,18 @@ class Binaries:
         wrapper executable directly, not to the commands that `bitcoin` calls.
         """
         if self.bin_dir is not None:
-            return [os.path.join(self.bin_dir, os.path.basename(bin_path))]
+            # Previous-release compatibility tests use upstream Bitcoin Core
+            # binaries, whose executable names differ from BitcoinRocks.
+            previous_release_binaries = {
+                "node": "bitcoind",
+                "rpc": "bitcoin-cli",
+                "bench": "bench_bitcoin",
+                "tx": "bitcoin-tx",
+                "util": "bitcoin-util",
+                "wallet": "bitcoin-wallet",
+                "chainstate": "bitcoin-chainstate",
+            }
+            return [os.path.join(self.bin_dir, previous_release_binaries[command])]
         elif self.paths.bitcoin_cmd is not None or need_ipc:
             # If the current test needs IPC functionality, use the bitcoin
             # wrapper binary and append -m so it calls multiprocess binaries.
@@ -319,14 +330,14 @@ def get_binary_paths(config):
 
     paths = types.SimpleNamespace()
     binaries = {
-        "bitcoin": "BITCOIN_BIN",
-        "bitcoind": "BITCOIND",
-        "bench_bitcoin": "BITCOIN_BENCH",
-        "bitcoin-cli": "BITCOINCLI",
-        "bitcoin-util": "BITCOINUTIL",
-        "bitcoin-tx": "BITCOINTX",
-        "bitcoin-chainstate": "BITCOINCHAINSTATE",
-        "bitcoin-wallet": "BITCOINWALLET",
+        "bitcoinrocks": "BITCOIN_BIN",
+        "bitcoinrocksd": "BITCOIND",
+        "bench_bitcoinrocks": "BITCOIN_BENCH",
+        "bitcoinrocks-cli": "BITCOINCLI",
+        "bitcoinrocks-util": "BITCOINUTIL",
+        "bitcoinrocks-tx": "BITCOINTX",
+        "bitcoinrocks-chainstate": "BITCOINCHAINSTATE",
+        "bitcoinrocks-wallet": "BITCOINWALLET",
     }
     # Set paths to bitcoin core binaries allowing overrides with environment
     # variables.
@@ -535,7 +546,7 @@ def initialize_datadir(dirname, n, chain, disable_autoconnect=True):
     datadir = get_datadir_path(dirname, n)
     if not os.path.isdir(datadir):
         os.makedirs(datadir)
-    write_config(os.path.join(datadir, "bitcoin.conf"), n=n, chain=chain, disable_autoconnect=disable_autoconnect)
+    write_config(os.path.join(datadir, "bitcoinrocks.conf"), n=n, chain=chain, disable_autoconnect=disable_autoconnect)
     os.makedirs(os.path.join(datadir, 'stderr'), exist_ok=True)
     os.makedirs(os.path.join(datadir, 'stdout'), exist_ok=True)
     return datadir
@@ -606,27 +617,37 @@ def get_temp_default_datadir(temp_dir: pathlib.Path) -> tuple[dict, pathlib.Path
     temp_dir, as well as the complete path it would return."""
     if platform.system() == "Windows":
         env = dict(APPDATA=str(temp_dir))
-        datadir = temp_dir / "Bitcoin"
+        datadir = temp_dir / "BitcoinRocks"
     else:
         env = dict(HOME=str(temp_dir))
         if platform.system() == "Darwin":
-            datadir = temp_dir / "Library/Application Support/Bitcoin"
+            datadir = temp_dir / "Library/Application Support/BitcoinRocks"
         else:
-            datadir = temp_dir / ".bitcoin"
+            datadir = temp_dir / ".bitcoinrocks"
     return env, datadir
 
 
 def append_config(datadir, options):
-    with open(os.path.join(datadir, "bitcoin.conf"), 'a') as f:
-        for option in options:
-            f.write(option + "\n")
+    config_paths = [os.path.join(datadir, "bitcoinrocks.conf")]
+
+    # Previous-release compatibility nodes use upstream Bitcoin Core and
+    # therefore require bitcoin.conf. If TestNode created that compatibility
+    # config, keep subsequent config additions synchronized with it.
+    legacy_config = os.path.join(datadir, "bitcoin.conf")
+    if os.path.isfile(legacy_config):
+        config_paths.append(legacy_config)
+
+    for config_path in config_paths:
+        with open(config_path, 'a') as f:
+            for option in options:
+                f.write(option + "\n")
 
 
 def get_auth_cookie(datadir, chain):
     user = None
     password = None
-    if os.path.isfile(os.path.join(datadir, "bitcoin.conf")):
-        with open(os.path.join(datadir, "bitcoin.conf"), 'r') as f:
+    if os.path.isfile(os.path.join(datadir, "bitcoinrocks.conf")):
+        with open(os.path.join(datadir, "bitcoinrocks.conf"), 'r') as f:
             for line in f:
                 if line.startswith("rpcuser="):
                     assert user is None  # Ensure that there is only one rpcuser line

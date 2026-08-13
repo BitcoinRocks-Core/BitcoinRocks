@@ -104,6 +104,8 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
             v >> tx_spending.vin[0].scriptSig;
             v >> tx_spending.vin[0].scriptWitness.stack;
             if (!v.empty()) return std::nullopt; // extraneous data encountered
+        } catch (const std::ios_base::failure&) {
+            return std::nullopt; // parsing error
         } catch (const std::exception&) {
             return std::nullopt; // parsing error
         }

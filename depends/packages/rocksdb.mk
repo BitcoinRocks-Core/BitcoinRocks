@@ -42,7 +42,10 @@ define $(package)_set_vars
   $(package)_config_opts+=-DWITH_NUMA=OFF
   $(package)_config_opts+=-DWITH_TBB=OFF
 
-  $(package)_config_opts+=-DUSE_RTTI=OFF
+  # Keep RocksDB RTTI enabled consistently across all BitcoinRocks targets.
+  # Disabling RTTI in the static RocksDB archive can break C++ exception/type
+  # identity when linked into an RTTI-enabled BitcoinRocks executable.
+  $(package)_config_opts+=-DUSE_RTTI=ON
   $(package)_config_opts+=-DPORTABLE=ON
   $(package)_config_opts+=-DFAIL_ON_WARNINGS=OFF
 
