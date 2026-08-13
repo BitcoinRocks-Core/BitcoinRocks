@@ -228,9 +228,6 @@ jobs:
             -DWITH_LIBURING=OFF \
             -DWITH_NUMA=OFF \
             -DWITH_TBB=OFF \
-            # Required on macOS/arm64: RocksDB built with -fno-rtti emits private
-            # libc++ exception RTTI that breaks catch(std::exception&) matching
-            # when the static archive is linked into BitcoinRocks.
             -DUSE_RTTI=ON \
             -DPORTABLE=ON \
             -DFAIL_ON_WARNINGS=OFF \
