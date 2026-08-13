@@ -40,6 +40,25 @@ fi
 # Tests that run natively guess the host
 export HOST=${HOST:-$("$BASE_ROOT_DIR/depends/config.guess")}
 
+# BitcoinRocks requires pinned LZ4, Zstd, and RocksDB even for native CI
+# jobs that intentionally avoid the full Depends toolchain. Build only
+# the mandatory storage dependencies while leaving all other libraries
+# to the native CI environment.
+if [ -n "$NO_DEPENDS" ] && [ "$CI_OS_NAME" != "macos" ]; then
+  bash -c "make $MAKEJOBS -C depends HOST=$HOST \
+    NO_BOOST=1 \
+    NO_LIBEVENT=1 \
+    NO_QT=1 \
+    NO_QR=1 \
+    NO_WALLET=1 \
+    NO_ZMQ=1 \
+    NO_USDT=1 \
+    NO_IPC=1 \
+    LOG=1"
+
+  export CMAKE_PREFIX_PATH="${DEPENDS_DIR}/${HOST}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+fi
+
 echo "=== BEGIN env ==="
 env
 echo "=== END env ==="
