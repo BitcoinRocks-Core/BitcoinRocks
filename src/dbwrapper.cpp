@@ -116,14 +116,14 @@ static std::optional<size_t> GetRocksDBTotalRAM()
 {
     [[maybe_unused]] auto clamp{
         [](uint64_t v) {
-            return size_t{
+            return static_cast<size_t>(
                 std::min(
                     v,
                     uint64_t{
                         std::numeric_limits<size_t>::max()
                     }
                 )
-            };
+            );
         }
     };
 

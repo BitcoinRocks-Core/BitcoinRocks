@@ -6,7 +6,7 @@ $(package)_file_name=v$($(package)_version).tar.gz
 $(package)_sha256_hash=df2ff348f3fac8578fd4b727eee7267aaf90cd403c99b55e898d1db63fa8cff5
 $(package)_dependencies=lz4 zstd
 $(package)_build_subdir=build
-$(package)_patches=runtime_sse42_crc32c.patch
+$(package)_patches=runtime_sse42_crc32c.patch rocksdb_arm32_monotonic_timer.patch macos_cross_arm64_crc32c.patch
 
 define $(package)_set_vars
   $(package)_config_opts=-DCMAKE_BUILD_TYPE=None
@@ -56,7 +56,9 @@ define $(package)_set_vars
 endef
 
 define $(package)_preprocess_cmds
-  patch -p1 < $($(package)_patch_dir)/runtime_sse42_crc32c.patch
+  patch -p1 < $($(package)_patch_dir)/runtime_sse42_crc32c.patch && \
+  patch -p1 < $($(package)_patch_dir)/rocksdb_arm32_monotonic_timer.patch && \
+  patch -p1 < $($(package)_patch_dir)/macos_cross_arm64_crc32c.patch
 endef
 
 define $(package)_config_cmds

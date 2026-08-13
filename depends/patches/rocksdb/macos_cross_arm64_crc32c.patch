@@ -1,0 +1,9 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1058 +1058,2 @@
+-if(HAS_ARMV8_CRC)
++if(HAS_ARMV8_CRC OR
++   (APPLE AND CMAKE_CXX_COMPILER_TARGET MATCHES "^(arm64|aarch64)"))
+@@ -1061 +1062 @@
+-endif(HAS_ARMV8_CRC)
++endif()

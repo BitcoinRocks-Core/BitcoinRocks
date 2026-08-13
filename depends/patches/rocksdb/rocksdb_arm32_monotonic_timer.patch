@@ -1,0 +1,14 @@
+--- a/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
++++ b/utilities/transactions/lock/range/range_tree/lib/portability/toku_time.h
+@@ -120,6 +120,11 @@ static inline tokutime_t toku_time_now(void) {
+   uint64_t result;
+   __asm __volatile__("mrs %[rt], cntvct_el0" : [rt] "=r"(result));
+   return result;
++#elif defined(__arm__) && defined(__linux__)
++  struct timespec ts;
++  clock_gettime(CLOCK_MONOTONIC, &ts);
++  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
++         static_cast<uint64_t>(ts.tv_nsec);
+ #elif defined(__powerpc__)
+   return __ppc_get_timebase();
+ #elif defined(__s390x__)

@@ -1,6 +1,6 @@
 --- a/util/crc32c.cc
 +++ b/util/crc32c.cc
-@@ -47,8 +47,22 @@
+@@ -47,8 +47,23 @@
 
  ASSERT_FEATURE_COMPAT_HEADER();
 
@@ -9,6 +9,7 @@
 +// the optimized SSE4.2/PCLMUL CRC32C implementation as a runtime-selected
 +// target on GCC and Clang.
 +#if defined(__x86_64__) && \
++    !defined(__APPLE__) && \
 +    (defined(__GNUC__) || defined(__clang__)) && \
 +    !defined(NO_PCLMUL) && \
 +    !(defined(__SSE4_2__) && defined(__PCLMUL__))
@@ -24,7 +25,7 @@
  #include <wmmintrin.h>
  #endif
 
-@@ -426,7 +440,17 @@
+@@ -426,7 +441,17 @@
   * <davejwatson@fb.com>
   *
   */
@@ -43,7 +44,7 @@
 
  #define CRCtriplet(crc, buf, offset)                  \
    crc##0 = _mm_crc32_u64(crc##0, *(buf##0 + offset)); \
-@@ -1101,7 +1125,15 @@
+@@ -1101,7 +1126,15 @@
    }
  }
 
@@ -60,7 +61,7 @@
 
  static inline Function Choose_Extend() {
  #ifdef HAVE_POWER8
-@@ -1113,6 +1145,18 @@
+@@ -1113,6 +1146,18 @@
    } else {
      return ExtendImpl<DefaultCRC32>;
    }

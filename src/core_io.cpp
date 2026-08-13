@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <ios>
 #include <map>
 #include <memory>
 #include <optional>

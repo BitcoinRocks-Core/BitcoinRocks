@@ -23,7 +23,6 @@
 #include <util/fs.h>
 #include <validation.h>
 
-#include <cstdio>
 #include <exception>
 #include <ios>
 #include <span>
