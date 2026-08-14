@@ -163,18 +163,18 @@ util::Expected<TxoSpender, std::string> TxoSpenderIndex::ReadTransaction(const C
     try {
         SpanReader{raw} >> header;
 
-        const size_t transaction_position{
+        const uint64_t transaction_position{
             GetSerializeSize(header) +
-            static_cast<size_t>(tx_pos.nTxOffset)
+            static_cast<uint64_t>(tx_pos.nTxOffset)
         };
 
-        if (transaction_position >= raw.size()) {
+        if (transaction_position >= static_cast<uint64_t>(raw.size())) {
             return util::Unexpected{
                 "txospenderindex offset exceeds decompressed block size"
             };
         }
 
-        SpanReader{raw.subspan(transaction_position)} >>
+        SpanReader{raw.subspan(static_cast<size_t>(transaction_position))} >>
             TX_WITH_WITNESS(spender.tx);
 
         spender.block_hash = header.GetHash();
