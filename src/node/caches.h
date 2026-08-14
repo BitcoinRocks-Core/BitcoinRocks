@@ -36,15 +36,15 @@ static constexpr size_t MIN_AUTOMATIC_DB_CACHE{
     512_MiB
 };
 
-static constexpr size_t MAX_AUTOMATIC_DB_CACHE{
-    12'288_MiB
+static constexpr uint64_t MAX_AUTOMATIC_DB_CACHE{
+    uint64_t{12'288} << 20
 };
 
 /*
  * High-end automatic cache ceiling.
  */
-static constexpr size_t MAX_HIGH_END_AUTOMATIC_DB_CACHE{
-    24'576_MiB
+static constexpr uint64_t MAX_HIGH_END_AUTOMATIC_DB_CACHE{
+    uint64_t{24'576} << 20
 };
 
 /*
@@ -55,7 +55,7 @@ static constexpr int HIGH_END_DATABASE_MIN_THREADS{
 };
 
 static constexpr uint64_t HIGH_END_DATABASE_MIN_MEMORY{
-    49'152_MiB
+    uint64_t{49'152} << 20
 };
 
 /*
@@ -63,8 +63,8 @@ static constexpr uint64_t HIGH_END_DATABASE_MIN_MEMORY{
  * high-end database allocation profile merely because the host
  * has substantial hardware.
  */
-static constexpr size_t HIGH_END_PROFILE_MIN_DB_CACHE{
-    12'288_MiB
+static constexpr uint64_t HIGH_END_PROFILE_MIN_DB_CACHE{
+    uint64_t{12'288} << 20
 };
 
 namespace node {

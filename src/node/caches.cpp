@@ -27,7 +27,9 @@ static constexpr size_t STANDARD_MAX_TX_INDEX_CACHE{
 };
 
 static constexpr size_t HIGH_END_MAX_TX_INDEX_CACHE{
-    4096_MiB
+    sizeof(size_t) == 4
+        ? 1024_MiB
+        : static_cast<size_t>(uint64_t{4096} << 20)
 };
 
 static constexpr size_t STANDARD_MAX_TXOSPENDER_INDEX_CACHE{
@@ -35,7 +37,9 @@ static constexpr size_t STANDARD_MAX_TXOSPENDER_INDEX_CACHE{
 };
 
 static constexpr size_t HIGH_END_MAX_TXOSPENDER_INDEX_CACHE{
-    4096_MiB
+    sizeof(size_t) == 4
+        ? 1024_MiB
+        : static_cast<size_t>(uint64_t{4096} << 20)
 };
 
 /*
