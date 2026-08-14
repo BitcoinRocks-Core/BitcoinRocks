@@ -16,6 +16,7 @@
 #include <kernel/messagestartchars.h>
 #include <kernel/notifications_interface.h>
 #include <kernel/types.h>
+#include <limits>
 #include <pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
@@ -213,10 +214,17 @@ std::vector<std::byte> DecompressBlockPayload(std::span<const std::byte> compres
         ZSTD_getFrameContentSize(compressed.data(), compressed.size())
     };
 
-    if (frame_size == ZSTD_CONTENTSIZE_ERROR) {
+    const unsigned long long content_size_unknown{
+        std::numeric_limits<unsigned long long>::max()
+    };
+    const unsigned long long content_size_error{
+        content_size_unknown - 1
+    };
+
+    if (frame_size == content_size_error) {
         throw std::runtime_error{"Invalid ZSTD block frame"};
     }
-    if (frame_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+    if (frame_size == content_size_unknown) {
         throw std::runtime_error{"ZSTD block frame does not declare its decompressed size"};
     }
     if (frame_size < 80 || frame_size > MAX_SIZE) {

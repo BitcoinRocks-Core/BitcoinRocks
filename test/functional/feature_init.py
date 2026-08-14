@@ -122,7 +122,7 @@ class InitTest(BitcoinTestFramework):
         deletion_rounds = [
             {
                 'filepath_glob': 'blocks/index/*.sst',
-                'error_message': 'Error opening block database.',
+                'error_message': r'Error (opening|initializing) block database\.',
                 'startup_args': [],
             },
             {
