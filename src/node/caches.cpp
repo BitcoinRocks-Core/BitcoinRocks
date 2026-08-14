@@ -77,7 +77,7 @@ bool IsHighEndDatabaseHardware(
         hardware_threads >=
             HIGH_END_DATABASE_MIN_THREADS &&
         physical_memory &&
-        *physical_memory >=
+        static_cast<uint64_t>(*physical_memory) >=
             HIGH_END_DATABASE_MIN_MEMORY;
 }
 
@@ -244,7 +244,7 @@ CacheSizes CalculateCacheSizes(
 
     const bool high_end{
         high_end_hardware &&
-        total_cache >=
+        static_cast<uint64_t>(total_cache) >=
             HIGH_END_PROFILE_MIN_DB_CACHE
     };
 
